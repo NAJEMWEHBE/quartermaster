@@ -45,8 +45,16 @@ python regen_arsenal.py --prune --rebuild-index  # finalize + build the semantic
 python query_arsenal.py "what do I have for writing tests?"
 ```
 
-Install the `/arsenal` chat skill from `skill/SKILL.md` (fill in your paths) so your
-agent answers arsenal questions natively.
+## Install the /arsenal chat skill
+
+This repo doubles as a Claude Code **plugin marketplace**. In the app:
+Settings → Plugins → Add marketplace → enter `NAJEMWEHBE/quartermaster` → Sync →
+enable the **quartermaster** plugin. Your agent then answers
+"what do I have for X?" natively via the `/arsenal` skill (it locates your engine
+clone by the `QUARTERMASTER_DIR` env var, by searching, or by asking once).
+
+CLI equivalent: `/plugin marketplace add NAJEMWEHBE/quartermaster` then
+`/plugin install quartermaster@quartermaster`.
 
 ## Keeping it fresh
 

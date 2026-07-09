@@ -1,0 +1,8 @@
+{
+  "name": "quartermaster",
+  "description": "The /arsenal skill: answer \"what do I have for X?\" from your studied tool catalog.",
+  "version": "1.0.0",
+  "skills": [
+    "./skills/arsenal"
+  ]
+}

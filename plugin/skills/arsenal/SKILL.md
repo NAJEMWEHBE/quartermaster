@@ -5,16 +5,27 @@ description: Answer "what do I have for X?" from the owner's studied tool catalo
 
 # Arsenal — the Quartermaster knowing layer
 
-The owner forgets what tools they own. This skill answers from the studied catalog —
-never from memory.
+The owner forgets what tools they own. This skill answers from their studied catalog —
+never from memory. The catalog is built by the Quartermaster engine:
+https://github.com/NAJEMWEHBE/quartermaster
 
-> Template note: replace `<PYTHON>` and `<QM_DIR>` with your install's paths, or ship a
-> wrapper script on PATH.
+## Locate the engine (once per session)
+
+The engine is wherever the owner cloned the repo. Find it, in order:
+
+1. `QUARTERMASTER_DIR` environment variable, if set.
+2. Glob the likely spots for `quartermaster.config.json` next to `query_arsenal.py`
+   (e.g. `~/quartermaster*`, `~/projects/quartermaster*`, drive roots they work on).
+3. Ask the owner once where they cloned it, and suggest they set `QUARTERMASTER_DIR`
+   (or write it to project memory) so you never ask again.
+
+If no clone exists anywhere: the catalog hasn't been set up. Point them at the repo's
+README quick start instead of guessing answers.
 
 ## Need → tools ("what do I have for X?")
 
 ```
-<PYTHON> <QM_DIR>/query_arsenal.py --k 5 "<the need in plain words>"
+python <ENGINE_DIR>/query_arsenal.py --k 5 "<the need in plain words>"
 ```
 
 Semantic top-k over the catalog. Present the hits in plain words: what each tool is,
@@ -24,7 +35,7 @@ If the query is vague, query with 2-3 phrasings and merge.
 ## Single tool ("what does X do?")
 
 ```
-<PYTHON> <QM_DIR>/query_arsenal.py --explain <tool-id>
+python <ENGINE_DIR>/query_arsenal.py --explain <tool-id>
 ```
 
 Forgiving lookup (substring match, lists candidates when ambiguous). Explain simply —
@@ -33,8 +44,8 @@ plain words first, then the avoid_when so the owner knows the boundaries.
 ## Degrade path (exit code 2 = embedding down)
 
 If the script reports EMBEDDING-UNAVAILABLE, do NOT give up: read `arsenal.json` in the
-work dir directly (fields: id/what/use_when/avoid_when/triggers/tier) and answer from
-that. Say semantic search was down.
+engine's work dir directly (fields: id/what/use_when/avoid_when/triggers/tier) and answer
+from that. Say semantic search was down.
 
 ## Known limits (be honest about them)
 

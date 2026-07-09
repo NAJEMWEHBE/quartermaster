@@ -1,0 +1,14 @@
+# catalog data is personal - the repo ships the engine, not your arsenal
+data/
+*.log
+__pycache__/
+*.pyc
+arsenal.json
+arsenal.json.bak
+ARSENAL.md
+arsenal_items.json
+arsenal_index.npz
+arsenal_index.meta.json
+regen_plan.json
+regen_study_todo.json
+quality-report.txt

@@ -17,7 +17,10 @@ import shutil
 import subprocess
 import sys
 
-from config import cfg, nkey, work_path
+import catalog_file
+from config import cfg, work_path
+from entry import render_md
+from matching import contains, nkey
 
 PY = sys.executable
 
@@ -35,9 +38,6 @@ def diff(live, studied):
             if k:
                 studied_slugs.setdefault(k, it)
     live_slugs = {nkey(it.get("name")): it for it in live if nkey(it.get("name"))}
-
-    def contains(k, keys):  # fuzzy containment for messy model tags only
-        return any(len(k) >= 8 and len(o) >= 8 and (k in o or o in k) for o in keys)
 
     added = [it for s, it in live_slugs.items()
              if s not in studied_slugs
@@ -84,12 +84,18 @@ def main():
     prunable = [i for i in removed if i.get("kind") != "model"]
     if "--prune" in flags and prunable and studied:
         rm = {nkey(i.get("name")) for i in prunable} | {nkey(i.get("id")) for i in prunable}
-        kept = [it for it in studied if nkey(it.get("name")) not in rm and nkey(it.get("id")) not in rm]
         path = work_path("arsenal.json")
+        # Structural fix: prune through the catalog_file owner so the header
+        # (count/by_tier/by_kind/generated) is recomputed instead of patched in place -
+        # the old in-place patch left by_tier/by_kind/generated stale. The kept ITEMS
+        # are the same as before; only the header is now consistent. ARSENAL.md is also
+        # regenerated (the old prune left it stale).
+        _, entries = catalog_file.parse(path)
+        kept = [e for e in entries if nkey(e.name) not in rm and nkey(e.id) not in rm]
         shutil.copy2(path, path + ".bak")
-        full = json.load(open(path, encoding="utf-8"))
-        full["items"], full["count"] = kept, len(kept)
-        json.dump(full, open(path, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+        payload = catalog_file.write(path, kept)
+        with open(work_path("ARSENAL.md"), "w", encoding="utf-8") as f:
+            f.write(render_md(kept, payload["generated"]))
         print(f"  PRUNED {len(prunable)} items -> arsenal.json ({len(kept)} left, .bak written)")
 
     if "--rebuild-index" in flags:

@@ -19,6 +19,12 @@ The engine is wherever the owner cloned the repo. Find it, in order:
 3. Ask the owner once where they cloned it, and suggest they set `QUARTERMASTER_DIR`
    (or write it to project memory) so you never ask again.
 
+The engine's scripts read their config from the `QUARTERMASTER_CONFIG` environment
+variable (falling back to `quartermaster.config.json` beside the scripts). If the owner
+keeps their data outside the clone, `QUARTERMASTER_CONFIG` must point at their config —
+suggest setting it user-wide alongside `QUARTERMASTER_DIR`. Exit code 2 with
+CATALOG-UNAVAILABLE means the config resolved to a work dir with no `arsenal.json`.
+
 If no clone exists anywhere: the catalog hasn't been set up. Point them at the repo's
 README quick start instead of guessing answers.
 

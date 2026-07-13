@@ -16,6 +16,7 @@ import json
 import sys
 
 from config import cfg, embed, work_path
+from entry import offline_label
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -29,7 +30,7 @@ def fmt(entry, sim=None):
     head = f"## {entry['name']}  `{entry['kind']}` / {entry['tier']}"
     if sim is not None:
         head += f"  (match {sim:.2f})"
-    off = "offline" if entry.get("offline") is True else ("partial" if entry.get("offline") == "partial" else "online")
+    off = offline_label(entry.get("offline"))
     lines = [head, f"_{off}, {entry.get('cost', '?')}_"]
     for k, label in (("what", "What"), ("use_when", "Use when"), ("avoid_when", "Avoid when"),
                      ("example", "Example")):
@@ -49,7 +50,13 @@ def main():
     ap.add_argument("--sims", action="store_true", help="print raw similarity list")
     args = ap.parse_args()
 
-    items = load_catalog()
+    try:
+        items = load_catalog()
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"CATALOG-UNAVAILABLE: {e}", file=sys.stderr)
+        print("No readable arsenal.json in the work dir. Check QUARTERMASTER_CONFIG / the "
+              "config's work_dir, and run assemble_catalog.py first.")
+        return 2
     min_sim = cfg().get("query", {}).get("min_sim", 0.60)
 
     if args.explain:
@@ -74,8 +81,17 @@ def main():
         import numpy as np
         meta = json.load(open(work_path("arsenal_index.meta.json"), encoding="utf-8"))
         vecs = np.load(work_path("arsenal_index.npz"), allow_pickle=False)["vecs"]
-        qv = np.asarray(embed([q])[0], dtype=vecs.dtype)
-        sims = vecs @ qv  # both sides L2-normalized at build/embed time
+        # Defensive query-time normalization: validate the embedding shape, renormalize
+        # the query vector, and divide by fresh row norms (zero-guarded) rather than
+        # trusting build-time normalization.
+        qv = np.asarray(embed([q]), dtype=vecs.dtype)
+        if qv.ndim != 2 or qv.shape[0] != 1:
+            raise RuntimeError(f"bad query embedding shape {qv.shape}")
+        qv = qv[0]
+        qv = qv / (np.linalg.norm(qv) or 1.0)
+        norms = np.linalg.norm(vecs, axis=1)
+        norms[norms == 0] = 1.0
+        sims = (vecs @ qv) / norms
     except Exception as e:
         print(f"EMBEDDING-UNAVAILABLE: {e}", file=sys.stderr)
         print("Semantic search down (Ollama not serving / index missing). "

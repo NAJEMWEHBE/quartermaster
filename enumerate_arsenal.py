@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 
 from config import cfg, work_path
 
@@ -76,12 +77,28 @@ def agents(agents_dir):
     return out
 
 
+def local_mcp(mcp_dir):
+    """Enumerate locally-installed MCP servers as kind='mcp' items. Each immediate
+    subdirectory of mcp_dir is one server. Config-driven (scan.mcp_dir); returns []
+    when unset so no personal path is hardcoded."""
+    out = []
+    if not mcp_dir:
+        return out
+    d = os.path.expanduser(mcp_dir)
+    if os.path.isdir(d):
+        for x in sorted(os.listdir(d)):
+            if os.path.isdir(os.path.join(d, x)):
+                out.append({"kind": "mcp", "name": x, "scope": "local"})
+    return out
+
+
 def ollama_models():
     try:
         r = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=20)
         return [{"kind": "model", "name": l.split()[0], "engine": "ollama-local"}
                 for l in r.stdout.splitlines()[1:] if l.strip()]
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"WARNING: ollama list failed ({e}); skipping model enumeration", file=sys.stderr)
         return []
 
 
@@ -93,6 +110,8 @@ def main():
         items += enabled_plugins(scan["claude_settings"])
     if scan.get("agents_dir"):
         items += agents(scan["agents_dir"])
+    if scan.get("mcp_dir"):
+        items += local_mcp(scan["mcp_dir"])
     if scan.get("ollama_models"):
         items += ollama_models()
 

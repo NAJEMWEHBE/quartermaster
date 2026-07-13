@@ -18,6 +18,7 @@
     ],
     "agents_dir": "~/.claude/agents",
     "claude_settings": "~/.claude/settings.json",
+    "mcp_dir": null,
     "ollama_models": true
   }
 }

@@ -78,6 +78,31 @@ Similarity scales differ per embedding model. Run
 `query.min_sim` in the config just above the junk ceiling (0.60 fits
 qwen3-embedding:0.6b).
 
+## Library modules
+
+The scripts are thin CLIs over three owner modules — each policy is defined once and
+imported everywhere, so readers never re-derive it:
+
+- `entry.py` — the `Entry` record: field contract, tier vocabulary, the
+  offline/partial/online label, normalization, stub creation, the `ARSENAL.md`
+  renderer, and the semantic-index embedding text.
+- `matching.py` — how a tool's name/id collapses to a match key (`slug`, `nkey`,
+  fuzzy model-tag `contains`, `dedup_key`).
+- `catalog_file.py` — the `arsenal.json` contract (`build`/`write`/`parse`); the header
+  is recomputed on every write, so `count`/`by_tier`/`by_kind` never drift from `items`.
+
+See `docs/entry-schema.md` for the full field reference.
+
+## Tests
+
+```
+python -m pytest
+```
+
+Stdlib + `pytest` only, no network (embeddings are faked/injected in tests). Covers the
+owner round-trips, the match policy, stub lifecycle, prune header consistency, the
+renderer, and that the scripts stay import-only for the owned policies.
+
 ## License
 
 MIT

@@ -52,3 +52,13 @@ def test_build_index_and_query(qm_env, monkeypatch, capsys):
     assert query_arsenal.main() == 0
     out = capsys.readouterr().out
     assert "Foo" in out and "Arsenal matches for: foo" in out
+
+
+def test_query_missing_catalog_degrades(qm_env, monkeypatch, capsys):
+    # no assemble ran -> no arsenal.json in the work dir: must exit 2 with the
+    # CATALOG-UNAVAILABLE degrade, never an uncaught FileNotFoundError.
+    monkeypatch.setattr(sys, "argv", ["query_arsenal.py", "anything at all"])
+    assert query_arsenal.main() == 2
+    err = capsys.readouterr()
+    assert "CATALOG-UNAVAILABLE" in err.err
+    assert "QUARTERMASTER_CONFIG" in err.out

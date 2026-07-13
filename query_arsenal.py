@@ -50,7 +50,13 @@ def main():
     ap.add_argument("--sims", action="store_true", help="print raw similarity list")
     args = ap.parse_args()
 
-    items = load_catalog()
+    try:
+        items = load_catalog()
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"CATALOG-UNAVAILABLE: {e}", file=sys.stderr)
+        print("No readable arsenal.json in the work dir. Check QUARTERMASTER_CONFIG / the "
+              "config's work_dir, and run assemble_catalog.py first.")
+        return 2
     min_sim = cfg().get("query", {}).get("min_sim", 0.60)
 
     if args.explain:

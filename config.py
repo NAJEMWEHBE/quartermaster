@@ -6,7 +6,6 @@ the QUARTERMASTER_CONFIG environment variable). See README for the schema.
 """
 import json
 import os
-import re
 import sys
 import urllib.request
 
@@ -31,16 +30,6 @@ def work_path(*parts):
 
 def entries_dir():
     return work_path("entries")
-
-
-def slug(s):
-    return re.sub(r"[^a-z0-9]+", "-", str(s or "").lower()).strip("-")
-
-
-def nkey(s):
-    """Match key: strip parenthetical suffixes so studied names and enumerated
-    names collapse to the same key ('foo (plugin)' == 'foo')."""
-    return slug(re.sub(r"\(.*?\)", "", str(s or "")))
 
 
 def embed(texts, timeout=120):

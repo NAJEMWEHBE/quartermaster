@@ -22,7 +22,9 @@ import shutil
 import subprocess
 import sys
 
-from config import cfg, log, nkey, slug, work_path
+from config import cfg, log, work_path
+from entry import Entry
+from matching import nkey
 
 PY = sys.executable
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -34,17 +36,22 @@ def run(script, *args):
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
-def make_stub(item):
-    desc = (item.get("desc") or "").strip()
-    name = item.get("name") or "unknown"
-    return {
-        "id": slug(name), "kind": item.get("kind", "skill"), "name": name,
-        "what": (desc[:240] or f"{name} (no description found)") + " [STUB - not yet deep-studied]",
-        "use_when": f"Possibly relevant when the need matches: {desc[:160]}" if desc else "Unknown until studied.",
-        "avoid_when": "Stub entry pending deep study - details unverified.",
-        "offline": "", "cost": "", "pairs_with": [], "supersedes": [],
-        "triggers": [name], "example": "", "tier": "lite", "route_patterns": [],
-    }
+def stub_queue(added, old_stubs, deep_keys, live_keys):
+    """The study queue = (old stubs + newly-added) minus deep-covered minus uninstalled.
+
+    A stub retires the moment a deep entry for its key appears (deep_keys) or the tool
+    stops being installed (not in live_keys). Returns Entry records sorted by key.
+    added   : raw enumeration dicts for NEW tools
+    old_stubs: existing stub Entry records
+    """
+    merged = {}
+    for e in old_stubs:
+        merged[nkey(e.id)] = e
+    for it in added:
+        s = Entry.make_stub(it)
+        merged.setdefault(nkey(s.id), s)
+    return [e for k, e in sorted(merged.items())
+            if k and k not in deep_keys and k in live_keys]
 
 
 def main():
@@ -76,20 +83,18 @@ def main():
                 deep.add(nkey(e.get("name")))
     live_keys = {nkey(i.get("name")) for i in
                  json.load(open(work_path("arsenal_items.json"), encoding="utf-8")).get("items", [])}
-    merged = {}
+    old_stubs = []
     if os.path.exists(stubs_path):
         try:
             old = json.load(open(stubs_path, encoding="utf-8"))
-            for e in (old.get("items", old) if isinstance(old, dict) else old):
-                if isinstance(e, dict):
-                    merged[nkey(e.get("id"))] = e
+            old_stubs = [Entry.from_dict(e) for e in
+                         (old.get("items", old) if isinstance(old, dict) else old)
+                         if isinstance(e, dict)]
         except (OSError, json.JSONDecodeError):
             pass
-    for it in added:
-        s = make_stub(it)
-        merged.setdefault(nkey(s["id"]), s)
-    kept = [e for k, e in sorted(merged.items()) if k and k not in deep and k in live_keys]
-    json.dump(kept, open(stubs_path, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+    kept = stub_queue(added, old_stubs, deep, live_keys)
+    json.dump([e.to_dict() for e in kept], open(stubs_path, "w", encoding="utf-8"),
+              indent=1, ensure_ascii=False)
     log(f"stubs: {len(added)} new diffed, {len(kept)} pending study (the queue)")
 
     rc, out = run("assemble_catalog.py")

@@ -6,7 +6,12 @@ Modes:
                                              # + regen_study_todo.json when new items exist
   python regen_arsenal.py --prune            # also drop REMOVED items from arsenal.json (+.bak)
   python regen_arsenal.py --rebuild-index    # also run build_index.py
+  python regen_arsenal.py --prune --force-prune   # override the mass-prune guard
 Models are never auto-pruned (their tag matching is fuzzy).
+A prune that would drop >= PRUNE_GUARD_MIN items AND > PRUNE_GUARD_FRAC of the studied
+catalog is refused without --force-prune: that shape almost always means the LIVE
+enumeration collapsed (unmounted root, swept plugin cache), not a real mass uninstall
+(2026-07-19: a harness cache sweep read as 129 uninstalls and gutted the catalog).
 After NEW items appear: have your agent study regen_study_todo.json (see prompts/study-agent.md),
 then run assemble_catalog.py, then this with --prune --rebuild-index.
 """
@@ -23,6 +28,11 @@ from entry import render_md
 from matching import contains, nkey
 
 PY = sys.executable
+
+# Mass-prune circuit breaker: both must hold for a refusal, so small catalogs (and the
+# test fixtures) always prune freely while a collapse-shaped prune needs --force-prune.
+PRUNE_GUARD_MIN = 10     # absolute floor: refusals need at least this many prunable items
+PRUNE_GUARD_FRAC = 0.10  # relative: prunable share of the studied catalog above this
 
 
 def run_here(script, *args):
@@ -82,7 +92,14 @@ def main():
         print(f"  -> wrote regen_study_todo.json ({len(added)} items)")
 
     prunable = [i for i in removed if i.get("kind") != "model"]
-    if "--prune" in flags and prunable and studied:
+    frac = len(prunable) / len(studied) if studied else 0.0
+    if ("--prune" in flags and "--force-prune" not in flags
+            and len(prunable) >= PRUNE_GUARD_MIN and frac > PRUNE_GUARD_FRAC):
+        print(f"  PRUNE REFUSED: {len(prunable)}/{len(studied)} studied items ({frac:.0%}) "
+              f"would be dropped — that shape usually means the LIVE enumeration collapsed, "
+              f"not a mass uninstall. Check scan.skill_roots, then rerun with --force-prune "
+              f"if the removals are real.")
+    elif "--prune" in flags and prunable and studied:
         rm = {nkey(i.get("name")) for i in prunable} | {nkey(i.get("id")) for i in prunable}
         path = work_path("arsenal.json")
         # Structural fix: prune through the catalog_file owner so the header

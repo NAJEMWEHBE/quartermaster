@@ -104,7 +104,7 @@ def main():
         return 1
     rc, out = run("regen_arsenal.py", "--prune", "--rebuild-index")
     for l in out.strip().splitlines():
-        if any(k in l for k in ("LIVE inventory", "PRUNED", "build_index", "CATALOG FRESH")):
+        if any(k in l for k in ("LIVE inventory", "PRUNED", "PRUNE REFUSED", "build_index", "CATALOG FRESH")):
             log("regen: " + l.strip())
     if rc != 0:
         log(f"FATAL: prune/index failed: {out[-300:]}")

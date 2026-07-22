@@ -16,6 +16,7 @@
       "~/.claude/plugins/cache",
       "~/.claude/plugins/marketplaces"
     ],
+    "marketplaces_registry": "~/.claude/plugins/known_marketplaces.json",
     "agents_dir": "~/.claude/agents",
     "claude_settings": "~/.claude/settings.json",
     "mcp_dir": null,

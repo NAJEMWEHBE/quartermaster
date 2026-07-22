@@ -74,7 +74,7 @@ def qm_env(tmp_path, monkeypatch):
                   "model": "qwen3-embedding:0.6b"},
         "query": {"min_sim": 0.60},
         "scan": {"skill_roots": [], "agents_dir": None, "claude_settings": None,
-                 "mcp_dir": None, "ollama_models": False},
+                 "marketplaces_registry": None, "mcp_dir": None, "ollama_models": False},
     }
     cfg_path = tmp_path / "quartermaster.config.json"
     write_json(cfg_path, cfg)

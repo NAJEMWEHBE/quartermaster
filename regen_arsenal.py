@@ -5,7 +5,7 @@ Modes:
   python regen_arsenal.py                    # diff only (read-only). writes regen_plan.json
                                              # + regen_study_todo.json when new items exist
   python regen_arsenal.py --prune            # also drop REMOVED items from arsenal.json (+.bak)
-  python regen_arsenal.py --rebuild-index    # also run build_index.py
+  python regen_arsenal.py --rebuild-index    # also run build_index.py (exit 4 if it fails)
   python regen_arsenal.py --prune --force-prune   # override the mass-prune guard
 Models are never auto-pruned (their tag matching is fuzzy).
 A prune that would drop >= PRUNE_GUARD_MIN items AND > PRUNE_GUARD_FRAC of the studied
@@ -28,6 +28,10 @@ from entry import render_md
 from matching import LiveSet, keys_of
 
 PY = sys.executable
+
+# Exit codes: 0 ok | 1 enumerate failed (nothing changed) | 4 the catalog step finished but
+# the index build failed, so semantic search still uses the old index (query's INDEX-STALE).
+EXIT_INDEX_FAILED = 4
 
 # Mass-prune circuit breaker: both must hold for a refusal, so small catalogs (and the
 # test fixtures) always prune freely while a collapse-shaped prune needs --force-prune.
@@ -103,15 +107,17 @@ def main():
             f.write(render_md(kept, payload["generated"]))
         print(f"  PRUNED {len(prunable)} items -> arsenal.json ({len(kept)} left, .bak written)")
 
+    status = 0
     if "--rebuild-index" in flags:
         rc, out = run_here("build_index.py")
         print(f"  build_index.py: {'ok' if rc == 0 else 'FAILED'}")
         if rc != 0:
             print(out[-300:])
+            status = EXIT_INDEX_FAILED
 
     if not added and not removed:
         print("CATALOG FRESH - no changes since last study.")
-    return 0
+    return status
 
 
 if __name__ == "__main__":

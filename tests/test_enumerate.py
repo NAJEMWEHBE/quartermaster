@@ -133,3 +133,29 @@ def test_enumerate_includes_mcp_when_configured(qm_env):
     data = json.loads((qm_env / "arsenal_items.json").read_text(encoding="utf-8"))
     assert {"kind": "mcp", "name": "srv", "scope": "local"} in data["items"]
     assert data["counts"].get("mcp") == 1
+
+
+def _fm(tmp_path, body):
+    p = tmp_path / "SKILL.md"
+    p.write_text("---\n" + body + "---\n\n# Title\n", encoding="utf-8")
+    return enumerate_arsenal.frontmatter(str(p))
+
+
+def test_frontmatter_reads_yaml_block_scalars(tmp_path):
+    """Block scalars are common in SKILL.md files; the parser used to return the
+    indicator itself ("|-") as the description, which then became the stub text."""
+    assert _fm(tmp_path, "name: lit\ndescription: |-\n  Line one.\n  Line two.\n") == \
+        ("lit", "Line one.\nLine two.")
+    assert _fm(tmp_path, "name: fold\ndescription: >\n  Folded one\n  folded two.\n\nlicense: MIT\n") == \
+        ("fold", "Folded one folded two.")
+    assert _fm(tmp_path, "description: |\n    Deep indent\n      keeps relative indent\nname: after\n") == \
+        ("after", "Deep indent\n  keeps relative indent")
+
+
+def test_frontmatter_reads_multi_line_plain_and_quoted_scalars(tmp_path):
+    assert _fm(tmp_path, "name: plain\ndescription: Starts here\n  and continues.\n") == \
+        ("plain", "Starts here and continues.")
+    assert _fm(tmp_path, 'name: "q"\ndescription: "Quoted, with: colon\n  over two lines"\n') == \
+        ("q", "Quoted, with: colon over two lines")
+    assert _fm(tmp_path, "name: s\ndescription: 'It''s single'\n") == ("s", "It's single")
+    assert _fm(tmp_path, "name: plain-one\ndescription: just one line\n") == ("plain-one", "just one line")

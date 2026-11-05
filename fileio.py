@@ -4,7 +4,8 @@
 Every file in the work dir is written to a temp file beside it and then moved over the
 old one (os.replace), so a reader running at the same time (a query during the weekly
 job) or a crash mid-write never sees a half-written file: it sees the old one or the new
-one. Readers stay plain json.load.
+one. The data is fsynced before the move, so a power cut can't leave an empty file
+either. Readers stay plain json.load.
 """
 import json
 import os
@@ -25,6 +26,12 @@ def _replace(src, dst, tries=10):
             time.sleep(0.05 * (i + 1))
 
 
+def _umask():
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
+
+
 def write_with(path, write, mode="w", encoding="utf-8"):
     """Call write(f) on a temp file beside `path`, then move it into place. On any
     error the temp file is removed and `path` is left as it was."""
@@ -32,9 +39,13 @@ def write_with(path, write, mode="w", encoding="utf-8"):
     folder = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=folder)
     try:
+        if os.name == "posix":  # mkstemp makes the file owner-only; give it the usual mode
+            os.chmod(tmp, 0o666 & ~_umask())
         kw = {} if "b" in mode else {"encoding": encoding, "newline": ""}
         with os.fdopen(fd, mode, **kw) as f:
             write(f)
+            f.flush()
+            os.fsync(f.fileno())  # data on disk before the rename, or a power cut can empty it
         _replace(tmp, path)
     except BaseException:
         try:

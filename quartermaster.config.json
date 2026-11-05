@@ -12,10 +12,9 @@
   },
   "scan": {
     "skill_roots": [
-      "~/.claude/skills",
-      "~/.claude/plugins/cache",
-      "~/.claude/plugins/marketplaces"
+      "~/.claude/skills"
     ],
+    "installed_plugins": "~/.claude/plugins/installed_plugins.json",
     "marketplaces_registry": "~/.claude/plugins/known_marketplaces.json",
     "agents_dir": "~/.claude/agents",
     "claude_settings": "~/.claude/settings.json",

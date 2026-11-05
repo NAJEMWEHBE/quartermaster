@@ -1,9 +1,15 @@
 # Study-agent prompt template
 
 Give this to an agent (one per ~6 items) to turn `study_queue.json` items into deep
-catalog entries. Fill in `<WORK_DIR>`, `<ENGINE_DIR>` (the Quartermaster clone), `START` and
-`END` before sending. Pace your fleet:
-a handful of concurrent agents is plenty; large parallel bursts get rate-limited.
+catalog entries. Fill in before sending:
+
+- `<WORK_DIR>`: the config's work_dir (default `~/.quartermaster`)
+- `<ENGINE_DIR>`: the plugin folder (`${CLAUDE_PLUGIN_ROOT}`) or your clone of the repo
+- `START` and `END`: the slice of the queue this agent owns
+
+Pace your fleet: a handful of concurrent agents is plenty; large parallel bursts get
+rate-limited. When every agent has reported, run `assemble_catalog.py`, then
+`regen_arsenal.py --prune --rebuild-index`.
 
 ---
 
@@ -35,4 +41,5 @@ newly installed tools.
    so neither parallel agents nor next month's study run overwrite your file, and it
    sorts before the stub file.
 
-4. Report back: file written, entry count, problems.
+4. Report back: file written, entry count, problems. Done when the file holds exactly
+   one entry per item in your slice.

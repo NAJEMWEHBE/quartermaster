@@ -7,7 +7,13 @@ Modes:
   python query_arsenal.py --explain <tool-id>            # single-tool deep view
   python query_arsenal.py --sims "query"                 # raw similarities (threshold calibration)
 
-Exit codes: 0 ok | 2 embedding unavailable (degrade: read arsenal.json directly) | 1 error.
+Exit codes, one meaning each:
+  0 ok
+  1 usage error
+  2 EMBEDDING-UNAVAILABLE  no embedding server answered; arsenal.json is fine, read it directly
+  3 CATALOG-UNAVAILABLE    no readable arsenal.json in the work dir (config or setup problem)
+  4 INDEX-STALE            the semantic index is missing or was built with another model;
+                           run regen_arsenal.py --rebuild-index, meanwhile read arsenal.json
 The min_sim threshold lives in the config ("query": {"min_sim": ...}); calibrate per embed
 model with --sims (compare a junk query's top score vs real queries').
 """
@@ -19,6 +25,18 @@ from config import cfg, embed, work_path
 from entry import offline_label
 
 sys.stdout.reconfigure(encoding="utf-8")
+
+EXIT_EMBEDDING_DOWN = 2
+EXIT_NO_CATALOG = 3
+EXIT_INDEX_STALE = 4
+
+
+def _stale(why):
+    print(f"INDEX-STALE: {why}", file=sys.stderr)
+    print("The semantic index is missing or out of date. Rebuild it with "
+          "`regen_arsenal.py --rebuild-index`; meanwhile read arsenal.json in the work dir "
+          f"directly: {work_path('arsenal.json')}")
+    return EXIT_INDEX_STALE
 
 
 def load_catalog():
@@ -59,7 +77,7 @@ def main():
         print(f"CATALOG-UNAVAILABLE: {e}", file=sys.stderr)
         print("No readable arsenal.json in the work dir. Check QUARTERMASTER_CONFIG / the "
               "config's work_dir, and run assemble_catalog.py first.")
-        return 2
+        return EXIT_NO_CATALOG
     min_sim = cfg().get("query", {}).get("min_sim", 0.60)
 
     if args.explain:
@@ -83,26 +101,36 @@ def main():
         print("usage: query_arsenal.py <plain words need> | --explain <id>")
         return 1
 
+    import numpy as np
+    model = cfg().get("embed", {}).get("model")
     try:
-        import numpy as np
-        meta = json.load(open(work_path("arsenal_index.meta.json"), encoding="utf-8"))
+        with open(work_path("arsenal_index.meta.json"), encoding="utf-8") as f:
+            meta = json.load(f)
         vecs = np.load(work_path("arsenal_index.npz"), allow_pickle=False)["vecs"]
-        # Defensive query-time normalization: validate the embedding shape, renormalize
-        # the query vector, and divide by fresh row norms (zero-guarded) rather than
-        # trusting build-time normalization.
+        if vecs.ndim != 2 or vecs.shape[0] != len(meta["ids"]):
+            raise ValueError(f"index holds {vecs.shape} vectors for {len(meta['ids'])} ids")
+    except (OSError, ValueError, KeyError) as e:
+        return _stale(f"no usable index ({type(e).__name__}: {e})")
+    if meta.get("model") != model:
+        # A model swap that keeps the dimension would rank silently wrong, so the
+        # index's model must be the configured one, checked before any embedding.
+        return _stale(f"index built with {meta.get('model')!r}, config uses {model!r}")
+
+    try:
         qv = np.asarray(embed([q]), dtype=vecs.dtype)
-        if qv.ndim != 2 or qv.shape[0] != 1:
-            raise RuntimeError(f"bad query embedding shape {qv.shape}")
-        qv = qv[0]
-        qv = qv / (np.linalg.norm(qv) or 1.0)
-        norms = np.linalg.norm(vecs, axis=1)
-        norms[norms == 0] = 1.0
-        sims = (vecs @ qv) / norms
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError) as e:  # URLError/timeouts are OSError
         print(f"EMBEDDING-UNAVAILABLE: {e}", file=sys.stderr)
-        print("Semantic search down (Ollama not serving / index missing). "
-              "Degrade: read arsenal.json in the work dir directly.")
-        return 2
+        print("Semantic search is down (no embedding server answered). Degrade: read "
+              f"arsenal.json in the work dir directly: {work_path('arsenal.json')}")
+        return EXIT_EMBEDDING_DOWN
+    if qv.ndim != 2 or qv.shape != (1, vecs.shape[1]):
+        return _stale(f"query embedding has shape {qv.shape}, index rows have {vecs.shape[1]} dims")
+    # Defensive query-time normalization: renormalize the query vector and divide by
+    # fresh row norms (zero-guarded) rather than trusting build-time normalization.
+    qv = qv[0] / (np.linalg.norm(qv[0]) or 1.0)
+    norms = np.linalg.norm(vecs, axis=1)
+    norms[norms == 0] = 1.0
+    sims = (vecs @ qv) / norms
 
     order = sims.argsort()[::-1]
     ids = meta["ids"]

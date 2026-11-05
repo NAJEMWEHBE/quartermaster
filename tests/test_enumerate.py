@@ -2,19 +2,16 @@
 import json
 import subprocess
 
-import pytest
-
-import config
-import enumerate_arsenal
+from quartermaster import cli, config, inventory
 
 
 def test_local_mcp_config_driven(tmp_path):
-    assert enumerate_arsenal.local_mcp(None) == []
-    assert enumerate_arsenal.local_mcp("") == []
+    assert inventory.local_mcp(None) == []
+    assert inventory.local_mcp("") == []
     (tmp_path / "server-a").mkdir()
     (tmp_path / "server-b").mkdir()
     (tmp_path / "loose.txt").write_text("x", encoding="utf-8")  # files ignored
-    assert enumerate_arsenal.local_mcp(str(tmp_path)) == [
+    assert inventory.local_mcp(str(tmp_path)) == [
         {"kind": "mcp", "name": "server-a", "scope": "local"},
         {"kind": "mcp", "name": "server-b", "scope": "local"},
     ]
@@ -42,7 +39,7 @@ def test_registry_gate_drops_orphan_marketplace_clones(tmp_path):
     orphan = _mkskill(mkts / "temp_123" / "skills" / "react-doctor", "react-doctor")
     outside = _mkskill(tmp_path / "cache" / "plug" / "skills" / "cached", "cached")
 
-    keep = enumerate_arsenal.registry_gate(_registry(tmp_path, mkts / "registered-mkt"))
+    keep = inventory.registry_gate(_registry(tmp_path, mkts / "registered-mkt"))
     assert keep(good) is True
     assert keep(orphan) is False      # under the marketplaces parent, not registered
     assert keep(outside) is True      # different tree entirely - never gated
@@ -52,13 +49,13 @@ def test_registry_gate_is_noop_without_a_readable_registry(tmp_path):
     """Fail-open: a missing/garbage/empty registry must never silently empty the scan -
     an enumeration collapse is exactly the failure this whole subsystem guards against."""
     orphan = _mkskill(tmp_path / "marketplaces" / "temp_x" / "skills" / "s", "s")
-    assert enumerate_arsenal.registry_gate(str(tmp_path / "missing.json"))(orphan) is True
+    assert inventory.registry_gate(str(tmp_path / "missing.json"))(orphan) is True
     bad = tmp_path / "bad.json"
     bad.write_text("{not json", encoding="utf-8")
-    assert enumerate_arsenal.registry_gate(str(bad))(orphan) is True
+    assert inventory.registry_gate(str(bad))(orphan) is True
     empty = tmp_path / "empty.json"
     empty.write_text("{}", encoding="utf-8")
-    assert enumerate_arsenal.registry_gate(str(empty))(orphan) is True
+    assert inventory.registry_gate(str(empty))(orphan) is True
 
 
 def test_registry_gate_never_gates_a_tree_outside_the_marketplaces_dir(tmp_path):
@@ -73,7 +70,7 @@ def test_registry_gate_never_gates_a_tree_outside_the_marketplaces_dir(tmp_path)
     far_mkt = _mkskill(projects / "dir-marketplace" / "skills" / "wrapped", "wrapped")
     sibling = _mkskill(projects / "some-repo" / "skills" / "mine", "mine")
 
-    keep = enumerate_arsenal.registry_gate(
+    keep = inventory.registry_gate(
         _registry(tmp_path, mkts / "registered-mkt", projects / "dir-marketplace"))
     assert keep(registered) is True
     assert keep(far_mkt) is True
@@ -88,21 +85,21 @@ def test_registry_gate_fails_open_on_every_malformed_registry_shape(tmp_path):
     reg = tmp_path / "r.json"
     for body in ('[{"installLocation": "x"}]', "null", '"hello"', "42"):
         reg.write_text(body, encoding="utf-8")
-        assert enumerate_arsenal.registry_gate(str(reg))(orphan) is True, body
+        assert inventory.registry_gate(str(reg))(orphan) is True, body
     # right shape, unusable entries: non-str location, no location, non-dict value
     reg.write_text(json.dumps({"a": {"installLocation": 123}, "b": {}, "c": None}),
                    encoding="utf-8")
-    assert enumerate_arsenal.registry_gate(str(reg))(orphan) is True
+    assert inventory.registry_gate(str(reg))(orphan) is True
     # a perfectly valid registry written in an encoding we cannot read
     utf16 = tmp_path / "utf16.json"
     utf16.write_bytes(json.dumps({"m": {"installLocation": "x"}}).encode("utf-16"))
-    assert enumerate_arsenal.registry_gate(str(utf16))(orphan) is True
+    assert inventory.registry_gate(str(utf16))(orphan) is True
 
 
 def test_registry_gate_announces_when_it_turns_itself_off(tmp_path, capsys):
     """A silently-off gate re-admits orphans and the next harness cleanup of them reads
     as a real uninstall - the collapse this whole subsystem guards against."""
-    enumerate_arsenal.registry_gate(str(tmp_path / "missing.json"))
+    inventory.registry_gate(str(tmp_path / "missing.json"))
     assert "orphan gate OFF" in capsys.readouterr().err
 
 
@@ -110,11 +107,11 @@ def test_find_skills_applies_the_keep_predicate(tmp_path):
     mkts = tmp_path / "marketplaces"
     _mkskill(mkts / "registered-mkt" / "skills" / "good", "good")
     _mkskill(mkts / "temp_123" / "skills" / "react-doctor", "react-doctor")
-    keep = enumerate_arsenal.registry_gate(_registry(tmp_path, mkts / "registered-mkt"))
-    names = {s["name"] for s in enumerate_arsenal.find_skills([str(mkts)], keep)}
+    keep = inventory.registry_gate(_registry(tmp_path, mkts / "registered-mkt"))
+    names = {s["name"] for s in inventory.find_skills([str(mkts)], keep)}
     assert names == {"good"}
     # no predicate -> the orphan comes back, proving the gate is what removed it
-    assert "react-doctor" in {s["name"] for s in enumerate_arsenal.find_skills([str(mkts)])}
+    assert "react-doctor" in {s["name"] for s in inventory.find_skills([str(mkts)])}
 
 
 def test_enumerate_gates_orphans_when_registry_configured(qm_env, tmp_path):
@@ -123,7 +120,7 @@ def test_enumerate_gates_orphans_when_registry_configured(qm_env, tmp_path):
     _mkskill(mkts / "temp_123" / "skills" / "react-doctor", "react-doctor")
     config.cfg()["scan"]["skill_roots"] = [str(mkts)]
     config.cfg()["scan"]["marketplaces_registry"] = _registry(tmp_path, mkts / "registered-mkt")
-    enumerate_arsenal.main()
+    cli.enumerate_main([])
     data = json.loads((qm_env / "arsenal_items.json").read_text(encoding="utf-8"))
     assert {s["name"] for s in data["items"]} == {"good"}
 
@@ -132,7 +129,7 @@ def test_enumerate_includes_mcp_when_configured(qm_env):
     mcpdir = qm_env / "mcp"
     (mcpdir / "srv").mkdir(parents=True)
     config.cfg()["scan"]["mcp_dir"] = str(mcpdir)  # cfg() returns the cached dict
-    enumerate_arsenal.main()
+    cli.enumerate_main([])
     data = json.loads((qm_env / "arsenal_items.json").read_text(encoding="utf-8"))
     assert {"kind": "mcp", "name": "srv", "scope": "local"} in data["items"]
     assert data["counts"].get("mcp") == 1
@@ -141,7 +138,7 @@ def test_enumerate_includes_mcp_when_configured(qm_env):
 def _fm(tmp_path, body):
     p = tmp_path / "SKILL.md"
     p.write_text("---\n" + body + "---\n\n# Title\n", encoding="utf-8")
-    return enumerate_arsenal.frontmatter(str(p))
+    return inventory.frontmatter(str(p))
 
 
 def test_frontmatter_reads_yaml_block_scalars(tmp_path):
@@ -191,8 +188,8 @@ def test_ollama_models_asks_the_running_server_and_never_starts_ollama(monkeypat
 
     monkeypatch.setattr(subprocess, "run", _no_subprocess)
     monkeypatch.setattr(subprocess, "Popen", _no_subprocess)
-    monkeypatch.setattr(enumerate_arsenal.urllib.request, "urlopen", fake_urlopen)
-    models = enumerate_arsenal.ollama_models("http://127.0.0.1:11434/")
+    monkeypatch.setattr(inventory.urllib.request, "urlopen", fake_urlopen)
+    models = inventory.ollama_models("http://127.0.0.1:11434/")
     assert [m["name"] for m in models] == ["qwen3-embedding:0.6b", "llama3:8b"]
     assert all(m["kind"] == "model" for m in models)
     assert seen["url"] == "http://127.0.0.1:11434/api/tags"
@@ -201,11 +198,11 @@ def test_ollama_models_asks_the_running_server_and_never_starts_ollama(monkeypat
 
 def test_ollama_models_warns_and_skips_when_the_server_is_down(monkeypatch, capsys):
     def refused(url, timeout=None):
-        raise enumerate_arsenal.urllib.error.URLError("connection refused")
+        raise inventory.urllib.error.URLError("connection refused")
 
     monkeypatch.setattr(subprocess, "run", _no_subprocess)
-    monkeypatch.setattr(enumerate_arsenal.urllib.request, "urlopen", refused)
-    assert enumerate_arsenal.ollama_models("http://127.0.0.1:11434") == []
+    monkeypatch.setattr(inventory.urllib.request, "urlopen", refused)
+    assert inventory.ollama_models("http://127.0.0.1:11434") == []
     assert "WARNING" in capsys.readouterr().err
 
 
@@ -250,7 +247,7 @@ def _configure_scan(home, skill_roots):
 
 
 def _enumerated_skills(qm_env):
-    enumerate_arsenal.main()
+    cli.enumerate_main([])
     data = json.loads((qm_env / "arsenal_items.json").read_text(encoding="utf-8"))
     return sorted((s["invoke"], s["desc"]) for s in data["items"] if s["kind"] == "skill")
 
@@ -282,9 +279,7 @@ def test_unreadable_installed_plugins_fails_loudly(qm_env, tmp_path):
     home = _fake_claude_home(tmp_path)
     (home / "plugins" / "installed_plugins.json").write_text("{not json", encoding="utf-8")
     _configure_scan(home, [str(home / "skills")])
-    with pytest.raises(SystemExit) as exc:
-        enumerate_arsenal.main()
-    assert exc.value.code not in (0, None)
+    assert cli.enumerate_main([]) == 1
 
 
 def _plugin(root, name, manifest=None):

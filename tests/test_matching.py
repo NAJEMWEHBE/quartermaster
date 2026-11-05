@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import matching
+from quartermaster import matching
 
 
 def test_slug_basic():

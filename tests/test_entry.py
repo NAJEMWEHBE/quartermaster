@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 import json
 
-import entry
-from entry import Entry, Tier, offline_label, embed_text, md_block, render_md
+from quartermaster import entry
+from quartermaster.entry import Entry, Tier, offline_label, embed_text, md_block, render_md
 
 
 def test_tier_coercion():

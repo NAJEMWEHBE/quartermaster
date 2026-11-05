@@ -223,6 +223,9 @@ def plugin_installs(installed_path):
         live = next((r["installPath"] for r in recs if os.path.isdir(os.path.expanduser(r["installPath"]))), None)
         if live:
             out[key] = os.path.expanduser(live)
+        else:
+            print(f"WARNING: {key} is installed but its folder is missing; its skills are not "
+                  f"listed until it is reinstalled", file=sys.stderr)
     return out
 
 
@@ -240,6 +243,47 @@ def enabled_plugin_keys(settings_path):
         return None
 
 
+def _read_json_quiet(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _declared_skills(root, plugin):
+    """The skill paths a plugin declares: its plugin.json `skills`, else the `skills` of
+    its entry in a marketplace.json shipped in the same folder (whole-repo plugins with
+    source "./"). None when nothing is declared."""
+    meta = os.path.join(root, ".claude-plugin")
+    pj = _read_json_quiet(os.path.join(meta, "plugin.json"))
+    declared = pj.get("skills") if isinstance(pj, dict) else None
+    if not declared:
+        mj = _read_json_quiet(os.path.join(meta, "marketplace.json"))
+        entries = mj.get("plugins") if isinstance(mj, dict) else None
+        for e in entries if isinstance(entries, list) else []:
+            if isinstance(e, dict) and e.get("name") == plugin and e.get("skills"):
+                declared = e["skills"]
+    if isinstance(declared, str):
+        declared = [declared]
+    return [d for d in declared if isinstance(d, str)] if isinstance(declared, list) else None
+
+
+def plugin_skill_files(root, plugin):
+    """The SKILL.md files Claude Code loads for one plugin: each declared path (a skill
+    folder, or a folder of skill folders), or by default skills/<name>/SKILL.md. Drafts
+    deeper in the tree and SKILL.md files elsewhere in the repo are not loaded."""
+    declared = _declared_skills(root, plugin)
+    if declared is None:
+        return sorted(glob.glob(os.path.join(root, "skills", "*", "SKILL.md")))
+    files = []
+    for d in declared:
+        d = os.path.normpath(os.path.join(root, d))
+        own = os.path.join(d, "SKILL.md")
+        files += [own] if os.path.isfile(own) else sorted(glob.glob(os.path.join(d, "*", "SKILL.md")))
+    return files
+
+
 def plugin_skills(installs, enabled=None):
     """Skills of each installed plugin that is enabled (all installed ones if `enabled`
     is None), read from the plugin's live install dir only."""
@@ -248,7 +292,7 @@ def plugin_skills(installs, enabled=None):
         if enabled is not None and key not in enabled:
             continue
         plugin, _, mkt = key.partition("@")
-        for p in _skill_files(installs[key]):
+        for p in plugin_skill_files(installs[key], plugin):
             item = _skill_item(p, plugin, mkt)
             if item["invoke"].lower() not in seen:
                 seen.add(item["invoke"].lower())
@@ -313,6 +357,17 @@ def ollama_models(url="http://127.0.0.1:11434", timeout=2):
         return []
 
 
+def _plugins_registry_above(root, levels=3):
+    """installed_plugins.json in `root` or up to `levels` folders above it, else None."""
+    d = os.path.abspath(os.path.expanduser(root))
+    for _ in range(levels + 1):
+        f = os.path.join(d, "installed_plugins.json")
+        if os.path.isfile(f):
+            return f
+        d = os.path.dirname(d)
+    return None
+
+
 def main():
     scan = cfg().get("scan", {})
     items = []
@@ -334,6 +389,13 @@ def main():
                 kept_roots.append(r)
         roots = kept_roots
         keep = lambda p: not _under(_norm(p), plugins_dir) and (gate is None or gate(p))  # noqa: E731
+    else:
+        for r in roots:
+            reg = _plugins_registry_above(r)
+            if reg:
+                print(f"WARNING: skill root {r} is inside a Claude plugins folder, which lists "
+                      f"stale versions and uninstalled plugins under bare names. Set "
+                      f"scan.installed_plugins to {reg} and drop this root.", file=sys.stderr)
     items += find_skills(roots, keep)
     if scan.get("installed_plugins"):
         items += plugin_skills(plugin_installs(scan["installed_plugins"]), enabled)

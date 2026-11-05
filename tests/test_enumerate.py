@@ -224,7 +224,7 @@ def _fake_claude_home(tmp_path):
     _skill_md(cache / "alpha" / "1.0.0" / "skills" / "tdd", "tdd", "old version")
     _skill_md(cache / "alpha" / "1.1.0" / "skills" / "tdd", "tdd", "live version")
     _skill_md(cache / "beta" / "1.0.0" / "skills" / "access", "access", "beta access")
-    _skill_md(cache / "gamma" / "2.0.0" / "skills" / "nested" / "access", "access", "gamma access")
+    _skill_md(cache / "gamma" / "2.0.0" / "skills" / "access", "access", "gamma access")
     _skill_md(cache / "off" / "1.0.0" / "skills" / "offskill", "offskill", "disabled plugin")
     _skill_md(plugins / "marketplaces" / "mkt" / "plugins" / "ghost" / "skills" / "ghost",
               "ghost", "plugin that is not installed")
@@ -285,3 +285,72 @@ def test_unreadable_installed_plugins_fails_loudly(qm_env, tmp_path):
     with pytest.raises(SystemExit) as exc:
         enumerate_arsenal.main()
     assert exc.value.code not in (0, None)
+
+
+def _plugin(root, name, manifest=None):
+    (root / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+    if manifest is not None:
+        (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def _only(home, key, path):
+    (home / "plugins" / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {
+        key: [{"scope": "user", "installPath": str(path), "version": "1"}]}}), encoding="utf-8")
+    (home / "settings.json").write_text(json.dumps({"enabledPlugins": {key: True}}), encoding="utf-8")
+
+
+def test_plugin_skills_are_the_ones_claude_code_loads(qm_env, tmp_path):
+    """Claude Code loads skills/<name>/SKILL.md, or exactly the paths a plugin declares.
+    Drafts deeper in the tree and SKILL.md files elsewhere in the repo are not tools."""
+    home = _fake_claude_home(tmp_path)
+    root = tmp_path / "claude" / "plugins" / "cache" / "mkt" / "kit" / "1.0.0"
+    _plugin(root, "kit", {"name": "kit", "skills": ["./skills/engineering/tdd", "./skills/misc"]})
+    _skill_md(root / "skills" / "engineering" / "tdd", "tdd", "declared skill dir")
+    _skill_md(root / "skills" / "misc" / "zoom", "zoom", "inside a declared folder")
+    _skill_md(root / "skills" / "in-progress" / "draft", "draft", "not declared")
+    _only(home, "kit@mkt", root)
+    _configure_scan(home, [])
+    assert [i for i, _ in _enumerated_skills(qm_env)] == ["kit:tdd", "kit:zoom"]
+
+    plain = tmp_path / "claude" / "plugins" / "cache" / "mkt" / "plain" / "1.0.0"
+    _plugin(plain, "plain", {"name": "plain"})
+    _skill_md(plain / "skills" / "one", "one", "default location")
+    _skill_md(plain / "skills" / "deep" / "two", "two", "too deep for the default")
+    _skill_md(plain / "registry" / "blocks" / "card", "card", "not a skill folder")
+    _only(home, "plain@mkt", plain)
+    assert [i for i, _ in _enumerated_skills(qm_env)] == ["plain:one"]
+
+
+def test_marketplace_entry_declares_the_skills_of_a_whole_repo_plugin(qm_env, tmp_path):
+    """Two plugins cut from one repo (source "./", strict false) each load only the
+    skills their marketplace entry lists, not every skill in the repo."""
+    home = _fake_claude_home(tmp_path)
+    root = tmp_path / "claude" / "plugins" / "cache" / "skills-mkt" / "docs" / "abc123"
+    for n in ("xlsx", "pdf", "art"):
+        _skill_md(root / "skills" / n, n, n)
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"name": "skills-mkt", "plugins": [
+        {"name": "docs", "source": "./", "strict": False, "skills": ["./skills/xlsx", "./skills/pdf"]},
+        {"name": "examples", "source": "./", "strict": False, "skills": ["./skills/art"]}]}), encoding="utf-8")
+    _only(home, "docs@skills-mkt", root)
+    _configure_scan(home, [])
+    assert [i for i, _ in _enumerated_skills(qm_env)] == ["docs:pdf", "docs:xlsx"]
+
+
+def test_an_installed_plugin_whose_folder_is_gone_is_reported(qm_env, tmp_path, capsys):
+    home = _fake_claude_home(tmp_path)
+    _only(home, "swept@mkt", tmp_path / "nowhere")
+    _configure_scan(home, [])
+    _enumerated_skills(qm_env)
+    assert "swept@mkt" in capsys.readouterr().err
+
+
+def test_plugin_roots_without_installed_plugins_warn(qm_env, tmp_path, capsys):
+    """A config from before installed_plugins existed still walks the plugin cache as a
+    plain root, which lists stale versions under bare names: say so."""
+    home = _fake_claude_home(tmp_path)
+    _configure_scan(home, [str(home / "skills"), str(home / "plugins" / "cache")])
+    config.cfg()["scan"]["installed_plugins"] = None
+    _enumerated_skills(qm_env)
+    err = capsys.readouterr().err
+    assert "scan.installed_plugins" in err and str(home / "plugins" / "installed_plugins.json") in err

@@ -8,7 +8,8 @@ Sources (all configured in quartermaster.config.json under "scan"):
   marketplaces_registry - path to known_marketplaces.json; skills under the sibling
                    marketplaces/ dir that belong to no registered marketplace are
                    dropped as orphan clones (optional; see registry_gate)
-  ollama_models  - true to include `ollama list` output as model items (optional)
+  ollama_models  - true to list the models of an already running Ollama server (GET
+                   /api/tags on embed.url) as model items; never starts Ollama (optional)
 Read-only. No secrets read or emitted.
 """
 import collections
@@ -16,8 +17,9 @@ import glob
 import json
 import os
 import re
-import subprocess
 import sys
+import urllib.error
+import urllib.request
 
 from config import cfg, work_path
 
@@ -215,13 +217,21 @@ def local_mcp(mcp_dir):
     return out
 
 
-def ollama_models():
+def ollama_models(url="http://127.0.0.1:11434", timeout=2):
+    """Models the running Ollama server has, via GET <url>/api/tags.
+
+    Never shells out to `ollama list`: on Windows that auto-launches the Ollama tray app
+    and server when none is running, and both outlive this run. A server that is down
+    just means no model items (with a warning)."""
     try:
-        r = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=20)
-        return [{"kind": "model", "name": l.split()[0], "engine": "ollama-local"}
-                for l in r.stdout.splitlines()[1:] if l.strip()]
-    except (OSError, subprocess.SubprocessError) as e:
-        print(f"WARNING: ollama list failed ({e}); skipping model enumeration", file=sys.stderr)
+        with urllib.request.urlopen(url.rstrip("/") + "/api/tags", timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        models = data.get("models", []) if isinstance(data, dict) else []
+        return [{"kind": "model", "name": m["name"], "engine": "ollama-local"}
+                for m in models if isinstance(m, dict) and isinstance(m.get("name"), str)]
+    except (OSError, ValueError) as e:
+        print(f"WARNING: no Ollama server answered at {url} ({e}); skipping model enumeration",
+              file=sys.stderr)
         return []
 
 
@@ -237,7 +247,7 @@ def main():
     if scan.get("mcp_dir"):
         items += local_mcp(scan["mcp_dir"])
     if scan.get("ollama_models"):
-        items += ollama_models()
+        items += ollama_models(cfg().get("embed", {}).get("url", "http://127.0.0.1:11434"))
 
     by_kind = collections.Counter(i["kind"] for i in items)
     out = work_path("arsenal_items.json")

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import json
+import subprocess
 
 import config
 import enumerate_arsenal
@@ -159,3 +160,48 @@ def test_frontmatter_reads_multi_line_plain_and_quoted_scalars(tmp_path):
         ("q", "Quoted, with: colon over two lines")
     assert _fm(tmp_path, "name: s\ndescription: 'It''s single'\n") == ("s", "It's single")
     assert _fm(tmp_path, "name: plain-one\ndescription: just one line\n") == ("plain-one", "just one line")
+
+
+class _FakeResponse:
+    def __init__(self, body):
+        self._body = body.encode("utf-8")
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _no_subprocess(*a, **k):
+    raise AssertionError("must not shell out: `ollama list` auto-starts the Ollama app on Windows")
+
+
+def test_ollama_models_asks_the_running_server_and_never_starts_ollama(monkeypatch):
+    seen = {}
+
+    def fake_urlopen(url, timeout=None):
+        seen["url"], seen["timeout"] = url, timeout
+        return _FakeResponse('{"models": [{"name": "qwen3-embedding:0.6b"}, {"name": "llama3:8b"}]}')
+
+    monkeypatch.setattr(subprocess, "run", _no_subprocess)
+    monkeypatch.setattr(subprocess, "Popen", _no_subprocess)
+    monkeypatch.setattr(enumerate_arsenal.urllib.request, "urlopen", fake_urlopen)
+    models = enumerate_arsenal.ollama_models("http://127.0.0.1:11434/")
+    assert [m["name"] for m in models] == ["qwen3-embedding:0.6b", "llama3:8b"]
+    assert all(m["kind"] == "model" for m in models)
+    assert seen["url"] == "http://127.0.0.1:11434/api/tags"
+    assert seen["timeout"] <= 5
+
+
+def test_ollama_models_warns_and_skips_when_the_server_is_down(monkeypatch, capsys):
+    def refused(url, timeout=None):
+        raise enumerate_arsenal.urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(subprocess, "run", _no_subprocess)
+    monkeypatch.setattr(enumerate_arsenal.urllib.request, "urlopen", refused)
+    assert enumerate_arsenal.ollama_models("http://127.0.0.1:11434") == []
+    assert "WARNING" in capsys.readouterr().err

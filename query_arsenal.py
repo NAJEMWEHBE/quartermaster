@@ -125,7 +125,11 @@ def main():
         qv = np.asarray(embed([q]), dtype=vecs.dtype)
     except (OSError, ValueError, RuntimeError) as e:  # URLError/timeouts are OSError
         print(f"EMBEDDING-UNAVAILABLE: {e}", file=sys.stderr)
-        print("Semantic search is down (no embedding server answered). Degrade: read "
+        if getattr(e, "code", None) == 404:  # urllib HTTPError: the server is up, the model isn't
+            why = f"the embedding model {model!r} is not on the server; run `ollama pull {model}`"
+        else:
+            why = "no embedding server answered"
+        print(f"Semantic search is down ({why}). Degrade: read "
               f"arsenal.json in the work dir directly: {work_path('arsenal.json')}")
         return EXIT_EMBEDDING_DOWN
     if qv.ndim != 2 or qv.shape != (1, vecs.shape[1]):

@@ -54,6 +54,7 @@ Each code has one meaning and one action:
 | code | label | do this |
 |---|---|---|
 | 0 | | present the results |
+| 1 | usage, or numpy missing (message says which) | fix the call, or use `--explain <id>` / read `arsenal.json`, which need no numpy |
 | 2 | EMBEDDING-UNAVAILABLE | read `arsenal.json` (path printed) and answer from it; say semantic search was down |
 | 3 | CATALOG-UNAVAILABLE | no catalog: check `QUARTERMASTER_CONFIG` / `work_dir`, or point the owner at the README quick start |
 | 4 | INDEX-STALE | read `arsenal.json` (path printed) and answer from it; tell the owner to run `regen_arsenal.py --rebuild-index` |

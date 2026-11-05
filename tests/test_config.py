@@ -32,3 +32,27 @@ def test_relative_work_dir_resolves_beside_the_config_not_the_cwd(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "does foo" in r.stdout
     assert not (elsewhere / "data").exists()
+
+
+def test_every_relative_path_in_the_config_resolves_beside_it(tmp_path, monkeypatch):
+    import config
+    cfg_path = tmp_path / "conf" / "quartermaster.config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({
+        "work_dir": "data", "copy_to": "../share/arsenal.json",
+        "scan": {"skill_roots": ["./skills", "~/abs-ish"], "installed_plugins": "p/installed.json",
+                 "claude_settings": "settings.json", "agents_dir": None, "ollama_models": False}}),
+        encoding="utf-8")
+    monkeypatch.setattr(config, "CONFIG_PATH", str(cfg_path))
+    monkeypatch.setattr(config, "_cfg", None)
+    monkeypatch.chdir(tmp_path)
+    c = config.cfg()
+    base = cfg_path.parent
+    assert c["work_dir"] == os.path.normpath(str(base / "data"))
+    assert c["copy_to"] == os.path.normpath(str(tmp_path / "share" / "arsenal.json"))
+    assert c["scan"]["skill_roots"][0] == os.path.normpath(str(base / "skills"))
+    assert c["scan"]["skill_roots"][1] == os.path.normpath(os.path.expanduser("~/abs-ish"))
+    assert c["scan"]["installed_plugins"] == os.path.normpath(str(base / "p" / "installed.json"))
+    assert c["scan"]["claude_settings"] == os.path.normpath(str(base / "settings.json"))
+    assert c["scan"]["agents_dir"] is None
+    config._cfg = None

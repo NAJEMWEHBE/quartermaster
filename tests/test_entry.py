@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import json
+
 import entry
 from entry import Entry, Tier, offline_label, embed_text, md_block, render_md
 
@@ -11,9 +13,11 @@ def test_tier_coercion():
     assert Tier.coerce("") is Tier.catalog
     assert Tier.coerce(None) is Tier.catalog
     assert Tier.coerce(Tier.lite) is Tier.lite
-    # StrEnum serializes as a plain string
+    # Tier prints and compares as a plain string
     assert str(Tier.route) == "route"
     assert Tier.route == "route"
+    assert f"{Tier.lite}" == "lite"
+    assert json.dumps({"t": Tier.catalog}) == '{"t": "catalog"}'
 
 
 def test_from_raw_list_coercion():

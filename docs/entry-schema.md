@@ -31,19 +31,25 @@ Honesty rule: entries that call marketplace filler what it is (`tier: lite`, blu
 
 ## Owning modules
 
-The entry record and its policies each have a single owner; scripts import them and
-never re-derive them:
+Each policy has one owner in the `quartermaster/` package; everything else imports it:
 
-- **`entry.py`** — the `Entry` record: `FIELDS` (the 14-field contract + order), the
+- **`entry.py`**: the `Entry` record: `FIELDS` (the 14-field contract and order), the
   `Tier` vocabulary, `offline_label` (the `offline`/`partial`/`online` tri-state),
   `Entry.from_raw` (normalization), `Entry.make_stub` (stub records), `md_block` /
   `render_md` (the one `ARSENAL.md` renderer), and `embed_text` (the semantic-index
   template).
-- **`matching.py`** — the match policy: `slug`, `nkey` (parenthetical-stripping match
-  key), `contains` (fuzzy model-tag containment), `dedup_key`.
-- **`catalog_file.py`** — the `arsenal.json` contract: `build` / `write` / `parse`. The
+- **`matching.py`**: tool identity: `slug`, `nkey`, `contains` (fuzzy model tags),
+  `dedup_key`, and `LiveSet` (does a catalog entry still stand for an installed tool).
+- **`catalog_file.py`**: the `arsenal.json` contract: `build` / `write` / `parse`. The
   header (`count`/`by_tier`/`by_kind`/`generated`) is recomputed from the items on every
   write, so it can never drift out of sync with `items`.
+- **`inventory.py`**: the live scan: which skills Claude Code loads, enabled plugins,
+  agents, MCP servers, Ollama models.
+- **`workspace.py`**: every file name in the work dir, and the atomic writes.
+- **`index.py`** / **`embedder.py`**: the semantic index and the embedder seam.
+- **`pipeline.py`**: the runs (enumerate, assemble, regen, weekly), each returning a
+  result object; **`cli.py`** parses arguments and prints those results. The top-level
+  `*.py` scripts only call `cli`.
 
 ## Stubs
 

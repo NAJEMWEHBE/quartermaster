@@ -2,9 +2,13 @@
 """Enumerate the LIVE arsenal from disk + optional sources into arsenal_items.json.
 
 Sources (all configured in quartermaster.config.json under "scan"):
-  skill_roots    - directories walked recursively for SKILL.md files
+  skill_roots    - directories walked recursively for SKILL.md files (user skills)
+  installed_plugins - path to Claude Code's installed_plugins.json; each enabled plugin's
+                   skills are read from its live install dir and named plugin:skill.
+                   Skill roots inside that plugins dir are then skipped (optional)
   agents_dir     - directory of agent .md files (optional)
-  claude_settings- path to a Claude settings.json; enabledPlugins become plugin items (optional)
+  claude_settings- path to a Claude settings.json; enabledPlugins become plugin items and
+                   decide which installed plugins count (optional)
   marketplaces_registry - path to known_marketplaces.json; skills under the sibling
                    marketplaces/ dir that belong to no registered marketplace are
                    dropped as orphan clones (optional; see registry_gate)
@@ -159,35 +163,108 @@ def registry_gate(registry_path):
     return keep
 
 
+def _skill_files(root):
+    return sorted(glob.glob(os.path.join(root, "**", "SKILL.md"), recursive=True))
+
+
+def _skill_item(path, plugin=None, marketplace=None):
+    """One live skill. `invoke` is how Claude Code calls it (`plugin:skill` for plugin
+    skills, the bare name otherwise) and is the skill's identity: two plugins may both
+    ship an `access` skill, and those are two different tools."""
+    name, desc = frontmatter(path)
+    name = name or os.path.basename(os.path.dirname(path))
+    item = {"kind": "skill", "name": name, "invoke": f"{plugin}:{name}" if plugin else name}
+    if plugin:
+        item.update(plugin=plugin, marketplace=marketplace)
+    item.update(desc=desc[:240], path=path)
+    return item
+
+
 def find_skills(roots, keep=None):
+    """Skills under plain skill roots (e.g. ~/.claude/skills), keyed by their invoke name;
+    the first root wins when two roots hold the same skill."""
     keep = keep or (lambda p: True)
     seen = {}
     for root in roots:
         root = os.path.expanduser(root)
         if not os.path.isdir(root):
             continue
-        for p in glob.glob(os.path.join(root, "**", "SKILL.md"), recursive=True):
-            if not keep(p):
-                continue
-            name, desc = frontmatter(p)
-            key = (name or os.path.basename(os.path.dirname(p))).lower()
-            if key not in seen:  # first root wins on duplicates
-                seen[key] = {"kind": "skill", "name": name or key, "desc": desc[:240], "path": p}
+        for p in _skill_files(root):
+            if keep(p):
+                item = _skill_item(p)
+                seen.setdefault(item["invoke"].lower(), item)
     return list(seen.values())
 
 
-def enabled_plugins(settings_path):
+def plugin_installs(installed_path):
+    """{"plugin@marketplace": installPath} from Claude Code's installed_plugins.json.
+
+    installPath is the one live version dir; the cache keeps older ones beside it. A
+    missing file means no plugins (warning). A file that exists but can't be read stops
+    the run: silently dropping every plugin skill would read as a mass uninstall."""
+    path = os.path.expanduser(installed_path)
+    if not os.path.exists(path):
+        print(f"WARNING: no installed-plugins file at {path}; no plugin skills listed", file=sys.stderr)
+        return {}
     try:
-        with open(os.path.expanduser(settings_path), encoding="utf-8") as f:
-            s = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return []
-    out = []
-    for k, v in s.get("enabledPlugins", {}).items():
-        if v is True:
-            name, _, mkt = k.partition("@")
-            out.append({"kind": "plugin", "name": name, "marketplace": mkt})
+        with open(path, encoding="utf-8") as f:
+            reg = json.load(f)
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"ERROR: cannot read {path} ({type(e).__name__}: {e})")
+    plugins = reg.get("plugins", reg) if isinstance(reg, dict) else None
+    if not isinstance(plugins, dict):
+        raise SystemExit(f"ERROR: {path} has no plugins object")
+    out = {}
+    for key, recs in plugins.items():
+        recs = [r for r in (recs if isinstance(recs, list) else [recs])
+                if isinstance(r, dict) and isinstance(r.get("installPath"), str)]
+        recs.sort(key=lambda r: r.get("scope") != "user")  # user scope first
+        live = next((r["installPath"] for r in recs if os.path.isdir(os.path.expanduser(r["installPath"]))), None)
+        if live:
+            out[key] = os.path.expanduser(live)
     return out
+
+
+def enabled_plugin_keys(settings_path):
+    """The set of "plugin@marketplace" keys enabled in a Claude settings.json, or None
+    when the file can't be read (callers then treat every installed plugin as enabled)."""
+    path = os.path.expanduser(settings_path)
+    try:
+        with open(path, encoding="utf-8") as f:
+            s = json.load(f)
+        enabled = s.get("enabledPlugins", {})
+        return {k for k, v in enabled.items() if v is True}
+    except (OSError, ValueError, AttributeError) as e:
+        print(f"WARNING: cannot read enabledPlugins from {path} ({type(e).__name__})", file=sys.stderr)
+        return None
+
+
+def plugin_skills(installs, enabled=None):
+    """Skills of each installed plugin that is enabled (all installed ones if `enabled`
+    is None), read from the plugin's live install dir only."""
+    out, seen = [], set()
+    for key in sorted(installs):
+        if enabled is not None and key not in enabled:
+            continue
+        plugin, _, mkt = key.partition("@")
+        for p in _skill_files(installs[key]):
+            item = _skill_item(p, plugin, mkt)
+            if item["invoke"].lower() not in seen:
+                seen.add(item["invoke"].lower())
+                out.append(item)
+    return out
+
+
+def plugin_items(keys):
+    out = []
+    for k in sorted(keys or ()):
+        name, _, mkt = k.partition("@")
+        out.append({"kind": "plugin", "name": name, "marketplace": mkt})
+    return out
+
+
+def enabled_plugins(settings_path):
+    return plugin_items(enabled_plugin_keys(settings_path))
 
 
 def agents(agents_dir):
@@ -238,10 +315,29 @@ def ollama_models(url="http://127.0.0.1:11434", timeout=2):
 def main():
     scan = cfg().get("scan", {})
     items = []
-    keep = registry_gate(scan["marketplaces_registry"]) if scan.get("marketplaces_registry") else None
-    items += find_skills(scan.get("skill_roots", []), keep)
+    gate = registry_gate(scan["marketplaces_registry"]) if scan.get("marketplaces_registry") else None
+    roots = scan.get("skill_roots", [])
+    keep = gate
+    enabled = enabled_plugin_keys(scan["claude_settings"]) if scan.get("claude_settings") else None
+    if scan.get("installed_plugins"):
+        # Plugin skills come from each enabled plugin's live install dir. Walking the
+        # plugins tree as a plain skill root (old configs did) would add every stale
+        # cached version and every skill of plugins that are not installed.
+        plugins_dir = _norm(os.path.dirname(os.path.expanduser(scan["installed_plugins"])))
+        kept_roots = []
+        for r in roots:
+            if _under(_norm(r), plugins_dir):
+                print(f"WARNING: skipping skill root {r}: plugin skills now come from "
+                      f"scan.installed_plugins", file=sys.stderr)
+            else:
+                kept_roots.append(r)
+        roots = kept_roots
+        keep = lambda p: not _under(_norm(p), plugins_dir) and (gate is None or gate(p))  # noqa: E731
+    items += find_skills(roots, keep)
+    if scan.get("installed_plugins"):
+        items += plugin_skills(plugin_installs(scan["installed_plugins"]), enabled)
     if scan.get("claude_settings"):
-        items += enabled_plugins(scan["claude_settings"])
+        items += plugin_items(enabled)
     if scan.get("agents_dir"):
         items += agents(scan["agents_dir"])
     if scan.get("mcp_dir"):

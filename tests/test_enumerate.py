@@ -2,6 +2,8 @@
 import json
 import subprocess
 
+import pytest
+
 import config
 import enumerate_arsenal
 
@@ -205,3 +207,81 @@ def test_ollama_models_warns_and_skips_when_the_server_is_down(monkeypatch, caps
     monkeypatch.setattr(enumerate_arsenal.urllib.request, "urlopen", refused)
     assert enumerate_arsenal.ollama_models("http://127.0.0.1:11434") == []
     assert "WARNING" in capsys.readouterr().err
+
+
+def _skill_md(path, name, desc):
+    path.mkdir(parents=True)
+    (path / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {desc}\n---\n", encoding="utf-8")
+
+
+def _fake_claude_home(tmp_path):
+    """A ~/.claude-shaped tree: the plugin cache keeps an old version dir, two plugins
+    ship a skill with the same name, one plugin is installed but disabled, and the
+    marketplace clone carries a plugin that is not installed at all."""
+    home = tmp_path / "claude"
+    plugins = home / "plugins"
+    cache = plugins / "cache" / "mkt"
+    _skill_md(cache / "alpha" / "1.0.0" / "skills" / "tdd", "tdd", "old version")
+    _skill_md(cache / "alpha" / "1.1.0" / "skills" / "tdd", "tdd", "live version")
+    _skill_md(cache / "beta" / "1.0.0" / "skills" / "access", "access", "beta access")
+    _skill_md(cache / "gamma" / "2.0.0" / "skills" / "nested" / "access", "access", "gamma access")
+    _skill_md(cache / "off" / "1.0.0" / "skills" / "offskill", "offskill", "disabled plugin")
+    _skill_md(plugins / "marketplaces" / "mkt" / "plugins" / "ghost" / "skills" / "ghost",
+              "ghost", "plugin that is not installed")
+    _skill_md(home / "skills" / "mine", "mine", "a user skill")
+
+    def rec(plugin, version):
+        return [{"scope": "user", "installPath": str(cache / plugin / version), "version": version}]
+
+    (plugins / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {
+        "alpha@mkt": rec("alpha", "1.1.0"), "beta@mkt": rec("beta", "1.0.0"),
+        "gamma@mkt": rec("gamma", "2.0.0"), "off@mkt": rec("off", "1.0.0")}}), encoding="utf-8")
+    (home / "settings.json").write_text(json.dumps({"enabledPlugins": {
+        "alpha@mkt": True, "beta@mkt": True, "gamma@mkt": True, "off@mkt": False}}), encoding="utf-8")
+    return home
+
+
+def _configure_scan(home, skill_roots):
+    scan = config.cfg()["scan"]
+    scan["skill_roots"] = skill_roots
+    scan["installed_plugins"] = str(home / "plugins" / "installed_plugins.json")
+    scan["claude_settings"] = str(home / "settings.json")
+    scan["marketplaces_registry"] = None
+
+
+def _enumerated_skills(qm_env):
+    enumerate_arsenal.main()
+    data = json.loads((qm_env / "arsenal_items.json").read_text(encoding="utf-8"))
+    return sorted((s["invoke"], s["desc"]) for s in data["items"] if s["kind"] == "skill")
+
+
+def test_plugin_skills_come_from_the_live_install_of_each_enabled_plugin(qm_env, tmp_path):
+    home = _fake_claude_home(tmp_path)
+    _configure_scan(home, [str(home / "skills")])
+    assert _enumerated_skills(qm_env) == [
+        ("alpha:tdd", "live version"),     # not the stale 1.0.0 dir the cache still holds
+        ("beta:access", "beta access"),    # two plugins' `access` skills stay two tools
+        ("gamma:access", "gamma access"),
+        ("mine", "a user skill"),          # user skills keep their bare name
+    ]                                      # no `offskill` (disabled), no `ghost` (not installed)
+
+
+def test_legacy_plugin_scan_roots_are_skipped_once_installed_plugins_is_set(qm_env, tmp_path, capsys):
+    """Old configs list plugins/cache and plugins/marketplaces as skill roots; walking them
+    would bring back every stale version and uninstalled plugin."""
+    home = _fake_claude_home(tmp_path)
+    plugins = home / "plugins"
+    _configure_scan(home, [str(home / "skills"), str(plugins / "cache"), str(plugins / "marketplaces")])
+    assert [i for i, _ in _enumerated_skills(qm_env)] == ["alpha:tdd", "beta:access", "gamma:access", "mine"]
+    assert "skipping skill root" in capsys.readouterr().err
+
+
+def test_unreadable_installed_plugins_fails_loudly(qm_env, tmp_path):
+    """A garbled plugin registry must stop the run, not quietly drop every plugin skill
+    (which the next --prune would read as a mass uninstall)."""
+    home = _fake_claude_home(tmp_path)
+    (home / "plugins" / "installed_plugins.json").write_text("{not json", encoding="utf-8")
+    _configure_scan(home, [str(home / "skills")])
+    with pytest.raises(SystemExit) as exc:
+        enumerate_arsenal.main()
+    assert exc.value.code not in (0, None)

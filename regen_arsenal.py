@@ -23,6 +23,7 @@ import subprocess
 import sys
 
 import catalog_file
+import fileio
 from config import cfg, work_path
 from entry import Entry, is_stub, render_md
 from matching import LiveSet, keys_of
@@ -73,15 +74,17 @@ def study_queue(live, studied):
 
 def write_study_queue(queue, generated):
     """Rewrite study_queue.json from scratch every run; no file when nothing is pending."""
-    for name in (STUDY_QUEUE, LEGACY_TODO):
+    stale = [LEGACY_TODO]
+    if queue:
+        fileio.write_json(work_path(STUDY_QUEUE),
+                          {"generated": generated, "count": len(queue), "items": queue})
+    else:
+        stale.append(STUDY_QUEUE)
+    for name in stale:
         try:
             os.remove(work_path(name))
         except FileNotFoundError:
             pass
-    if queue:
-        with open(work_path(STUDY_QUEUE), "w", encoding="utf-8") as f:
-            json.dump({"generated": generated, "count": len(queue), "items": queue}, f,
-                      indent=2, ensure_ascii=False)
 
 
 def main():
@@ -90,9 +93,9 @@ def main():
     if rc != 0:
         print("ERROR: enumerate failed:", out[-300:])
         return 1
-    live = json.load(open(work_path("arsenal_items.json"), encoding="utf-8")).get("items", [])
+    live = fileio.read_json(work_path("arsenal_items.json")).get("items", [])
     try:
-        studied = json.load(open(work_path("arsenal.json"), encoding="utf-8")).get("items", [])
+        studied = fileio.read_json(work_path("arsenal.json")).get("items", [])
     except (OSError, json.JSONDecodeError):
         studied = []
 
@@ -106,8 +109,7 @@ def main():
             "live_total": len(live), "studied_total": len(studied), "unchanged": unchanged,
             "added": added,
             "removed": [{"id": i.get("id"), "name": i.get("name"), "kind": i.get("kind")} for i in removed]}
-    with open(work_path("regen_plan.json"), "w", encoding="utf-8") as f:
-        json.dump(plan, f, indent=2, ensure_ascii=False)
+    fileio.write_json(work_path("regen_plan.json"), plan)
     queue = study_queue(live, studied)
     write_study_queue(queue, plan["generated"])
     if queue:
@@ -133,8 +135,7 @@ def main():
         kept = [e for e in entries if e.kind == "model" or now.covers(e)]
         shutil.copy2(path, path + ".bak")
         payload = catalog_file.write(path, kept)
-        with open(work_path("ARSENAL.md"), "w", encoding="utf-8") as f:
-            f.write(render_md(kept, payload["generated"]))
+        fileio.write_text(work_path("ARSENAL.md"), render_md(kept, payload["generated"]))
         print(f"  PRUNED {len(prunable)} items -> arsenal.json ({len(kept)} left, .bak written)")
 
     status = 0

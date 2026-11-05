@@ -1,5 +1,5 @@
 {
-  "work_dir": "./data",
+  "work_dir": "~/.quartermaster",
   "log_file": "weekly.log",
   "copy_to": null,
   "embed": {

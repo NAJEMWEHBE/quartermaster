@@ -13,3 +13,4 @@ regen_plan.json
 regen_study_todo.json
 study_queue.json
 quality-report.txt
+pruned_last.json

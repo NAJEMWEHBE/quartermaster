@@ -5,8 +5,8 @@ import os
 import subprocess
 import sys
 
-import catalog_file
-from entry import Entry
+from quartermaster import catalog_file
+from quartermaster.entry import Entry
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -35,7 +35,7 @@ def test_relative_work_dir_resolves_beside_the_config_not_the_cwd(tmp_path):
 
 
 def test_every_relative_path_in_the_config_resolves_beside_it(tmp_path, monkeypatch):
-    import config
+    from quartermaster import config
     cfg_path = tmp_path / "conf" / "quartermaster.config.json"
     cfg_path.parent.mkdir()
     cfg_path.write_text(json.dumps({
@@ -43,8 +43,7 @@ def test_every_relative_path_in_the_config_resolves_beside_it(tmp_path, monkeypa
         "scan": {"skill_roots": ["./skills", "~/abs-ish"], "installed_plugins": "p/installed.json",
                  "claude_settings": "settings.json", "agents_dir": None, "ollama_models": False}}),
         encoding="utf-8")
-    monkeypatch.setattr(config, "CONFIG_PATH", str(cfg_path))
-    monkeypatch.setattr(config, "_cfg", None)
+    monkeypatch.setenv("QUARTERMASTER_CONFIG", str(cfg_path))
     monkeypatch.chdir(tmp_path)
     c = config.cfg()
     base = cfg_path.parent
@@ -55,4 +54,34 @@ def test_every_relative_path_in_the_config_resolves_beside_it(tmp_path, monkeypa
     assert c["scan"]["installed_plugins"] == os.path.normpath(str(base / "p" / "installed.json"))
     assert c["scan"]["claude_settings"] == os.path.normpath(str(base / "settings.json"))
     assert c["scan"]["agents_dir"] is None
-    config._cfg = None
+
+
+def _fake_home(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    for var in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(var, str(home))
+    monkeypatch.delenv("QUARTERMASTER_CONFIG", raising=False)
+    return home
+
+
+def test_a_config_in_the_data_home_wins_over_the_shipped_one(tmp_path, monkeypatch):
+    """Plugin updates replace the engine folder, so the owner's edits live in ~/.quartermaster."""
+    from quartermaster import config
+    home = _fake_home(tmp_path, monkeypatch)
+    assert config.config_path() == config.DEFAULT_CONFIG
+    mine = home / ".quartermaster" / "quartermaster.config.json"
+    mine.parent.mkdir()
+    mine.write_text(json.dumps({"work_dir": "."}), encoding="utf-8")
+    assert config.config_path() == str(mine)
+    monkeypatch.setenv("QUARTERMASTER_CONFIG", str(tmp_path / "other.json"))
+    assert config.config_path() == str(tmp_path / "other.json")  # the env var beats both
+
+
+def test_the_default_data_home_is_outside_the_engine(tmp_path, monkeypatch):
+    from quartermaster import config
+    home = _fake_home(tmp_path, monkeypatch)
+    assert config.cfg(config.DEFAULT_CONFIG)["work_dir"] == str(home / ".quartermaster")
+    bare = tmp_path / "bare.json"
+    bare.write_text("{}", encoding="utf-8")
+    assert config.cfg(str(bare))["work_dir"] == str(home / ".quartermaster")

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-import catalog_file
-from entry import Entry
+from quartermaster import catalog_file
+from quartermaster.entry import Entry
 
 
 def _sample_entries():

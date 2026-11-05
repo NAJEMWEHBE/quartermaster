@@ -6,10 +6,8 @@ would remove >= PRUNE_GUARD_MIN items AND > PRUNE_GUARD_FRAC of the studied cata
 unless --force-prune is passed. Small prunes (< min-abs) are never refused, so the
 7-item fixture in test_regen_prune keeps pruning freely."""
 import json
-import sys
 
-import assemble_catalog
-import regen_arsenal
+from quartermaster import cli
 from conftest import write_json
 
 # 12 extra studied skills so prunable (18 non-model) clears PRUNE_GUARD_MIN and the
@@ -28,16 +26,15 @@ def _load(path):
 
 def _catalog_with_many(qm_env):
     write_json(qm_env / "entries" / "batch-03-many.json", BATCH_MANY)
-    assemble_catalog.main()
+    cli.assemble_main([])
     return _load(qm_env / "arsenal.json")
 
 
-def test_mass_prune_refused(qm_env, monkeypatch, capsys):
+def test_mass_prune_refused(qm_env, capsys):
     before = _catalog_with_many(qm_env)
     assert before["count"] == 19  # 7 fixture + 12 bulk
 
-    monkeypatch.setattr(sys, "argv", ["regen_arsenal.py", "--prune"])
-    assert regen_arsenal.main() == 0
+    assert cli.regen_main(["--prune"]) == 0
 
     out = capsys.readouterr().out
     assert "PRUNE REFUSED" in out
@@ -46,11 +43,10 @@ def test_mass_prune_refused(qm_env, monkeypatch, capsys):
     assert not (qm_env / "arsenal.json.bak").exists()  # no prune, no .bak
 
 
-def test_force_prune_overrides_guard(qm_env, monkeypatch, capsys):
+def test_force_prune_overrides_guard(qm_env, capsys):
     before = _catalog_with_many(qm_env)
 
-    monkeypatch.setattr(sys, "argv", ["regen_arsenal.py", "--prune", "--force-prune"])
-    assert regen_arsenal.main() == 0
+    assert cli.regen_main(["--prune", "--force-prune"]) == 0
 
     out = capsys.readouterr().out
     assert "PRUNE REFUSED" not in out
@@ -60,17 +56,15 @@ def test_force_prune_overrides_guard(qm_env, monkeypatch, capsys):
     assert (qm_env / "arsenal.json.bak").exists()
 
 
-def test_a_forced_prune_is_not_refused_again_next_week(qm_env, monkeypatch, capsys):
+def test_a_forced_prune_is_not_refused_again_next_week(qm_env, capsys):
     """assemble rebuilds arsenal.json from every batch file each week, so the removals
     --force-prune accepted come back; the guard must not refuse them a second time."""
     _catalog_with_many(qm_env)
-    monkeypatch.setattr(sys, "argv", ["regen_arsenal.py", "--prune", "--force-prune"])
-    assert regen_arsenal.main() == 0
-    assemble_catalog.main()                      # the weekly run's assemble step
+    assert cli.regen_main(["--prune", "--force-prune"]) == 0
+    cli.assemble_main([])                      # the weekly run's assemble step
     capsys.readouterr()
 
-    monkeypatch.setattr(sys, "argv", ["regen_arsenal.py", "--prune"])
-    assert regen_arsenal.main() == 0
+    assert cli.regen_main(["--prune"]) == 0
     out = capsys.readouterr().out
     assert "PRUNE REFUSED" not in out and "PRUNED" in out
 
@@ -78,7 +72,7 @@ def test_a_forced_prune_is_not_refused_again_next_week(qm_env, monkeypatch, caps
     write_json(qm_env / "entries" / "batch-04-more.json", [
         {"id": f"more{i}", "kind": "skill", "name": f"More{i}", "what": "w",
          "use_when": "u", "avoid_when": "a", "tier": "catalog"} for i in range(12)])
-    assemble_catalog.main()
+    cli.assemble_main([])
     capsys.readouterr()
-    assert regen_arsenal.main() == 0
+    assert cli.regen_main(["--prune"]) == 0
     assert "PRUNE REFUSED: 12/" in capsys.readouterr().out

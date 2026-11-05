@@ -2,8 +2,8 @@
 """Diff the LIVE arsenal against the studied catalog; optionally prune + rebuild index.
 
 Modes:
-  python regen_arsenal.py                    # diff only (read-only). writes regen_plan.json
-                                             # + regen_study_todo.json when new items exist
+  python regen_arsenal.py                    # diff only. writes regen_plan.json, and
+                                             # study_queue.json while anything is unstudied
   python regen_arsenal.py --prune            # also drop REMOVED items from arsenal.json (+.bak)
   python regen_arsenal.py --rebuild-index    # also run build_index.py (exit 4 if it fails)
   python regen_arsenal.py --prune --force-prune   # override the mass-prune guard
@@ -12,7 +12,7 @@ A prune that would drop >= PRUNE_GUARD_MIN items AND > PRUNE_GUARD_FRAC of the s
 catalog is refused without --force-prune: that shape almost always means the LIVE
 enumeration collapsed (unmounted root, swept plugin cache), not a real mass uninstall
 (2026-07-19: a harness cache sweep read as 129 uninstalls and gutted the catalog).
-After NEW items appear: have your agent study regen_study_todo.json (see prompts/study-agent.md),
+While study_queue.json exists: have your agent study it (see prompts/study-agent.md),
 then run assemble_catalog.py, then this with --prune --rebuild-index.
 """
 import datetime
@@ -24,7 +24,7 @@ import sys
 
 import catalog_file
 from config import cfg, work_path
-from entry import render_md
+from entry import Entry, is_stub, render_md
 from matching import LiveSet, keys_of
 
 PY = sys.executable
@@ -55,6 +55,35 @@ def diff(live, studied):
     return added, removed, len(studied) - len(removed)
 
 
+STUDY_QUEUE = "study_queue.json"
+LEGACY_TODO = "regen_study_todo.json"  # the old, NEW-only queue that went stale
+
+
+def study_queue(live, studied):
+    """Every live tool with no deep entry yet (new ones and stubbed ones alike), each with
+    the id its entry should get and what a study agent reads: desc and source path."""
+    now = LiveSet(live)
+    deep = keys_of(e for e in studied if not is_stub(e))
+    queue = []
+    for it in now.items:
+        if not now.known(it, deep):
+            queue.append({"id": Entry.make_stub(it).id, **it})
+    return queue
+
+
+def write_study_queue(queue, generated):
+    """Rewrite study_queue.json from scratch every run; no file when nothing is pending."""
+    for name in (STUDY_QUEUE, LEGACY_TODO):
+        try:
+            os.remove(work_path(name))
+        except FileNotFoundError:
+            pass
+    if queue:
+        with open(work_path(STUDY_QUEUE), "w", encoding="utf-8") as f:
+            json.dump({"generated": generated, "count": len(queue), "items": queue}, f,
+                      indent=2, ensure_ascii=False)
+
+
 def main():
     flags = set(sys.argv[1:])
     rc, out = run_here("enumerate_arsenal.py")
@@ -77,11 +106,12 @@ def main():
             "live_total": len(live), "studied_total": len(studied), "unchanged": unchanged,
             "added": added,
             "removed": [{"id": i.get("id"), "name": i.get("name"), "kind": i.get("kind")} for i in removed]}
-    json.dump(plan, open(work_path("regen_plan.json"), "w", encoding="utf-8"), indent=2, ensure_ascii=False)
-    if added:
-        json.dump({"items": added}, open(work_path("regen_study_todo.json"), "w", encoding="utf-8"),
-                  indent=2, ensure_ascii=False)
-        print(f"  -> wrote regen_study_todo.json ({len(added)} items)")
+    with open(work_path("regen_plan.json"), "w", encoding="utf-8") as f:
+        json.dump(plan, f, indent=2, ensure_ascii=False)
+    queue = study_queue(live, studied)
+    write_study_queue(queue, plan["generated"])
+    if queue:
+        print(f"  -> wrote {STUDY_QUEUE} ({len(queue)} items)")
 
     prunable = [i for i in removed if i.get("kind") != "model"]
     frac = len(prunable) / len(studied) if studied else 0.0

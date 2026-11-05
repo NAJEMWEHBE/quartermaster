@@ -26,6 +26,15 @@ FIELDS = ["id", "kind", "name", "what", "use_when", "avoid_when", "offline",
           "cost", "pairs_with", "supersedes", "triggers", "example", "tier", "route_patterns"]
 LIST_FIELDS = {"pairs_with", "supersedes", "triggers", "route_patterns"}
 
+# Ends the `what` of every placeholder entry; a tool whose entry carries it is unstudied.
+STUB_MARK = "[STUB - not yet deep-studied]"
+
+
+def is_stub(entry):
+    """True for a placeholder entry (dict or Entry), i.e. one still waiting for study."""
+    what = entry.get("what") if isinstance(entry, dict) else getattr(entry, "what", "")
+    return str(what or "").endswith(STUB_MARK)
+
 
 class Tier(str, Enum):
     """Catalog tier. A str subclass that prints and serializes as its plain value.
@@ -116,7 +125,7 @@ class Entry:
         name = item.get("invoke") or item.get("name") or "unknown"
         return cls(
             id=matching.slug(name), kind=item.get("kind", "skill"), name=name,
-            what=(desc[:240] or f"{name} (no description found)") + " [STUB - not yet deep-studied]",
+            what=(desc[:240] or f"{name} (no description found)") + " " + STUB_MARK,
             use_when=(f"Possibly relevant when the need matches: {desc[:160]}" if desc
                       else "Unknown until studied."),
             avoid_when="Stub entry pending deep study - details unverified; confirm against the tool itself before relying on it.",

@@ -33,7 +33,7 @@ git clone https://github.com/NAJEMWEHBE/quartermaster
 cd quartermaster
 # edit quartermaster.config.json - work_dir, scan roots, embed model
 python enumerate_arsenal.py        # what do you actually have?
-python regen_arsenal.py            # diff -> regen_study_todo.json (everything is NEW on first run)
+python regen_arsenal.py            # diff -> study_queue.json (everything is unstudied on first run)
 ```
 
 Then have your agent study the todo list using `prompts/study-agent.md` (a few items per
@@ -69,7 +69,7 @@ schtasks /Create /TN "Quartermaster-Weekly" /SC WEEKLY /D SUN /ST 05:00 /TR "pyt
 
 Each run is free (no LLM calls): new tools get stub entries immediately (visible to
 queries, marked as stubs), uninstalled tools are pruned, and the log ends with
-`pending study: N` — that's your cue to point an agent at the study queue.
+`pending study: N` — that's your cue to point an agent at `study_queue.json` in the work dir.
 
 ## Calibrating the match threshold
 

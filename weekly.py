@@ -6,7 +6,7 @@ Zero-LLM-cost chain:
   2. stub maintenance                 - NEW items get placeholder entries in
                                         entries/batch-zz-stubs.json so queries see them;
                                         stubs auto-retire when a deep entry appears or the
-                                        tool is uninstalled. The stub file IS the study queue.
+                                        tool is uninstalled.
   3. assemble_catalog.py              - rebuild catalog (deep entries shadow stubs:
                                         'zz' sorts last, dedup keeps first-loaded)
   4. regen_arsenal.py --prune --rebuild-index
@@ -16,7 +16,8 @@ Exit codes: 0 ok | 1 a step failed | 4 the catalog is fresh but the index build 
 (logged as INDEX STALE).
 
 Deep study stays manual and human-approved: when the log says 'pending study: N',
-point your agent at the stub queue with prompts/study-agent.md. No tokens spent here.
+point your agent at <work_dir>/study_queue.json with prompts/study-agent.md (regen rewrites
+that file every run). No tokens spent here.
 """
 import glob
 import json
@@ -41,7 +42,7 @@ def run(script, *args):
 
 
 def stub_queue(added, old_stubs, deep_keys, live):
-    """The study queue = (old stubs + newly-added) minus deep-covered minus uninstalled.
+    """The stubs to keep = (old stubs + newly-added) minus deep-covered minus uninstalled.
 
     A stub retires the moment a deep entry identifies the same live tool, or the tool
     stops being installed. Identity is matching.LiveSet's (kind-aware, plugin:skill).

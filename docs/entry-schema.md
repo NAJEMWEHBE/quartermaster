@@ -49,6 +49,12 @@ never re-derive them:
 
 `weekly.py` gives newly-installed tools a placeholder entry in
 `entries/batch-zz-stubs.json` (marked `[STUB - not yet deep-studied]`, `tier: lite`)
-so queries see them immediately. The stub file doubles as the deep-study queue; a stub
-retires automatically once a real entry for the same id appears in any other batch file,
-or the tool is uninstalled.
+so queries see them immediately. A stub retires automatically once a real entry for the
+same tool appears in any other batch file, or the tool is uninstalled.
+
+## Study queue
+
+Every `regen_arsenal.py` run rewrites `<work_dir>/study_queue.json`: each live tool that
+has no deep entry yet (new or stubbed), with the `id` its entry should use, its `invoke`
+name, `desc` and source `path`. The file is deleted when nothing is pending. Study agents
+read only this file (`prompts/study-agent.md`).

@@ -16,7 +16,7 @@ Readers never re-derive any of this; they import it.
 """
 import collections
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 
 import matching
 
@@ -27,11 +27,20 @@ FIELDS = ["id", "kind", "name", "what", "use_when", "avoid_when", "offline",
 LIST_FIELDS = {"pairs_with", "supersedes", "triggers", "route_patterns"}
 
 
-class Tier(StrEnum):
-    """Catalog tier. Serializes as a plain string (StrEnum)."""
+class Tier(str, Enum):
+    """Catalog tier. A str subclass that prints and serializes as its plain value.
+
+    (str, Enum) plus __str__/__format__ instead of StrEnum, which needs Python 3.11:
+    the engine supports 3.10+."""
     route = "route"      # core daily driver (rare); route_patterns are salience markers only
     catalog = "catalog"  # clearly useful
     lite = "lite"        # long-tail / stubs
+
+    def __str__(self):
+        return self.value
+
+    def __format__(self, spec):
+        return format(self.value, spec)
 
     @classmethod
     def coerce(cls, v):

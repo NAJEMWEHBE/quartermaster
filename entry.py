@@ -110,9 +110,10 @@ class Entry:
     @classmethod
     def make_stub(cls, item):
         """Placeholder record for a newly-enumerated, not-yet-deep-studied tool (was
-        weekly.make_stub). item is a raw enumeration dict with name/kind/desc."""
+        weekly.make_stub). item is a raw enumeration dict with name/kind/desc, and
+        `invoke` for skills (plugin skills: plugin:skill), which becomes the stub's name."""
         desc = (item.get("desc") or "").strip()
-        name = item.get("name") or "unknown"
+        name = item.get("invoke") or item.get("name") or "unknown"
         return cls(
             id=matching.slug(name), kind=item.get("kind", "skill"), name=name,
             what=(desc[:240] or f"{name} (no description found)") + " [STUB - not yet deep-studied]",

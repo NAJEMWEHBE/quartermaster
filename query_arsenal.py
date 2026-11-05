@@ -101,7 +101,12 @@ def main():
         print("usage: query_arsenal.py <plain words need> | --explain <id>")
         return 1
 
-    import numpy as np
+    try:
+        import numpy as np
+    except ImportError:
+        print("numpy is missing: pip install -r requirements.txt (--explain works without it)",
+              file=sys.stderr)
+        return 1
     model = cfg().get("embed", {}).get("model")
     try:
         with open(work_path("arsenal_index.meta.json"), encoding="utf-8") as f:

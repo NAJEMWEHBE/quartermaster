@@ -14,11 +14,12 @@ concurrency:
 
 jobs:
   pytest:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # 3.10 is the oldest version the README promises; keep it in the matrix.
+        # Windows is the main platform; 3.10 is the oldest version the README promises.
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.13"]
     steps:
       - uses: actions/checkout@v4

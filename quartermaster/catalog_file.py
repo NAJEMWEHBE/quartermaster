@@ -11,8 +11,8 @@ import collections
 import datetime
 import json
 
-import fileio
-from entry import Entry
+from . import workspace
+from .entry import Entry
 
 
 def build(items, generated=None):
@@ -36,7 +36,7 @@ def build(items, generated=None):
 def write(path, items, generated=None):
     """Write arsenal.json (indent=2, ensure_ascii=False). Returns the payload dict."""
     payload = build(items, generated)
-    fileio.write_json(path, payload)  # atomic: readers never see a half-written catalog
+    workspace.write_json(path, payload)  # atomic: readers never see a half-written catalog
     return payload
 
 

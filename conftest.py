@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Shared pytest fixtures. Lives at the repo root so the repo root is importable
-(config, entry, matching, catalog_file, and the scripts are top-level modules)."""
+(the quartermaster package and the entry-point scripts beside it)."""
 import json
 import os
 import sys
@@ -55,10 +55,7 @@ BATCH_ZZ_STUBS = [
 @pytest.fixture
 def qm_env(tmp_path, monkeypatch):
     """A configured work_dir with the standard batch files and QUARTERMASTER_CONFIG set.
-
-    Resets config's module-level cache so cfg() reloads the test config. Yields the
-    work_dir Path; tests may add/overwrite batch files under work_dir/entries.
-    """
+    Yields the work_dir Path; tests may add/overwrite batch files under work_dir/entries."""
     work = tmp_path / "work"
     entries = work / "entries"
     entries.mkdir(parents=True)
@@ -78,12 +75,15 @@ def qm_env(tmp_path, monkeypatch):
     }
     cfg_path = tmp_path / "quartermaster.config.json"
     write_json(cfg_path, cfg)
-    monkeypatch.setenv("QUARTERMASTER_CONFIG", str(cfg_path))
-
-    # config.CONFIG_PATH is resolved at import time, so point it at the test config
-    # directly (and clear the cache) rather than relying on the env var alone.
-    import config
-    monkeypatch.setattr(config, "CONFIG_PATH", str(cfg_path))
-    monkeypatch.setattr(config, "_cfg", None, raising=False)
+    monkeypatch.setenv("QUARTERMASTER_CONFIG", str(cfg_path))  # config reads it per call
     yield work
-    config._cfg = None
+
+
+class FakeEmbedder:
+    """An embedder (see quartermaster/embedder.py) backed by a plain function."""
+
+    def __init__(self, fn, model="qwen3-embedding:0.6b"):
+        self.fn, self.model = fn, model
+
+    def __call__(self, texts):
+        return self.fn(list(texts))

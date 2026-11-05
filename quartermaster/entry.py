@@ -18,7 +18,7 @@ import collections
 from dataclasses import dataclass, field
 from enum import Enum
 
-import matching
+from . import matching
 
 # The 14-field entry contract, in the exact serialization order. Byte-identity of
 # arsenal.json depends on this order (dicts preserve insertion order).

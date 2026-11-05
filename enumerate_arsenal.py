@@ -25,6 +25,7 @@ import sys
 import urllib.error
 import urllib.request
 
+import fileio
 from config import cfg, work_path
 
 
@@ -348,9 +349,7 @@ def main():
     by_kind = collections.Counter(i["kind"] for i in items)
     out = work_path("arsenal_items.json")
     os.makedirs(cfg()["work_dir"], exist_ok=True)
-    with open(out, "w", encoding="utf-8") as f:
-        json.dump({"items": items, "counts": dict(by_kind), "total": len(items)}, f,
-                  indent=2, ensure_ascii=False)
+    fileio.write_json(out, {"items": items, "counts": dict(by_kind), "total": len(items)})
     print(f"WROTE {out}")
     print("counts:", dict(by_kind), "total:", len(items))
 

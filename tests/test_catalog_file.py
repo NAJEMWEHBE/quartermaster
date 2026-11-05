@@ -42,3 +42,19 @@ def test_write_parse_round_trip(tmp_path):
     assert header["generated"] == "2026-01-01T00:00:00"
     expected = sorted(items, key=lambda e: (e.tier != "route", e.kind, e.id))
     assert parsed == expected
+
+
+def test_a_write_that_fails_midway_leaves_the_old_catalog_intact(tmp_path):
+    """Readers (a query during the weekly run) must never see a truncated arsenal.json."""
+    import json
+    import pytest
+    path = tmp_path / "arsenal.json"
+    catalog_file.write(str(path), _sample_entries(), generated="old")
+    before = path.read_text(encoding="utf-8")
+
+    broken = _sample_entries() + [Entry.from_raw({"id": "zz", "kind": "skill", "example": object()})]
+    with pytest.raises(TypeError):
+        catalog_file.write(str(path), broken, generated="new")
+    assert path.read_text(encoding="utf-8") == before
+    assert json.loads(before)["generated"] == "old"
+    assert [p.name for p in tmp_path.iterdir()] == ["arsenal.json"]  # no temp file left

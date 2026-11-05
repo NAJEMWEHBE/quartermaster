@@ -19,6 +19,7 @@ import os
 import re
 
 import catalog_file
+import fileio
 from config import cfg, entries_dir, work_path
 from entry import Entry, render_md
 from matching import dedup_key
@@ -73,10 +74,9 @@ def main():
 
     generated = datetime.datetime.now().isoformat(timespec="seconds")
     payload = catalog_file.write(work_path("arsenal.json"), items, generated=generated)
-    with open(work_path("ARSENAL.md"), "w", encoding="utf-8") as f:
-        f.write(render_md(items, generated))
-    with open(work_path("quality-report.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(qual) + "\n" if qual else "clean - no warnings\n")
+    fileio.write_text(work_path("ARSENAL.md"), render_md(items, generated))
+    fileio.write_text(work_path("quality-report.txt"),
+                      "\n".join(qual) + "\n" if qual else "clean - no warnings\n")
 
     print(f"batch files: {nfiles} | entries loaded: {len(raw)} | unique: {len(items)} | dups: {len(dups)}")
     print(f"by_tier: {payload['by_tier']} | by_kind: {payload['by_kind']}")

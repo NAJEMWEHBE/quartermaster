@@ -68,3 +68,32 @@ def test_an_entry_without_a_kind_matches_any_kind():
     """Hand-written or legacy entries may lack `kind`; they must not be pruned for it."""
     entry = {"id": "foo", "name": "Foo"}
     assert regen_arsenal.diff([skill("foo")], [entry]) == ([], [], 1)
+
+
+def test_regen_names_legacy_entries_whose_name_is_now_shared(qm_env, monkeypatch, capsys):
+    """A bare-name deep entry stops matching once two plugins ship that name. Its text
+    is dropped by the next prune, so regen says which entries need re-study."""
+    import sys
+    from conftest import write_json
+    home = qm_env.parent / "claude"
+    for plugin in ("beta", "gamma"):
+        d = home / "cache" / plugin / "skills" / "access"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("---\nname: access\ndescription: d\n---\n", encoding="utf-8")
+    write_json(home / "installed_plugins.json", {"version": 2, "plugins": {
+        f"{p}@mkt": [{"scope": "user", "installPath": str(home / "cache" / p)}] for p in ("beta", "gamma")}})
+    import json
+    cfg_path = qm_env.parent / "quartermaster.config.json"   # regen scans in a subprocess
+    c = json.loads(cfg_path.read_text(encoding="utf-8"))
+    c["scan"]["installed_plugins"] = str(home / "installed_plugins.json")
+    write_json(cfg_path, c)
+    write_json(qm_env / "entries" / "batch-05-legacy.json", [
+        {"id": "access", "kind": "skill", "name": "access", "what": "w", "use_when": "u",
+         "avoid_when": "a", "tier": "catalog"}])
+    import assemble_catalog
+    assemble_catalog.main()
+    capsys.readouterr()
+    monkeypatch.setattr(sys, "argv", ["regen_arsenal.py"])
+    assert regen_arsenal.main() == 0
+    out = capsys.readouterr().out
+    assert "name now shared by several live skills" in out and "access" in out

@@ -8,10 +8,12 @@ Modes:
   python regen_arsenal.py --rebuild-index    # also run build_index.py (exit 4 if it fails)
   python regen_arsenal.py --prune --force-prune   # override the mass-prune guard
 Models are never auto-pruned (their tag matching is fuzzy).
-A prune that would drop >= PRUNE_GUARD_MIN items AND > PRUNE_GUARD_FRAC of the studied
-catalog is refused without --force-prune: that shape almost always means the LIVE
+A prune that would newly drop >= PRUNE_GUARD_MIN items AND > PRUNE_GUARD_FRAC of the
+studied catalog is refused without --force-prune: that shape almost always means the LIVE
 enumeration collapsed (unmounted root, swept plugin cache), not a real mass uninstall
 (2026-07-19: a harness cache sweep read as 129 uninstalls and gutted the catalog).
+"Newly" means not removed by the last prune (pruned_last.json): assemble brings pruned
+entries back every week, and one accepted --force-prune must not be refused again.
 While study_queue.json exists: have your agent study it (see prompts/study-agent.md),
 then run assemble_catalog.py, then this with --prune --rebuild-index.
 """
@@ -26,7 +28,7 @@ import catalog_file
 import fileio
 from config import cfg, work_path
 from entry import Entry, is_stub, render_md
-from matching import LiveSet, keys_of
+from matching import LiveSet, keys_of, nkey
 
 PY = sys.executable
 
@@ -57,6 +59,7 @@ def diff(live, studied):
 
 
 STUDY_QUEUE = "study_queue.json"
+PRUNED_LAST = "pruned_last.json"  # what the last prune removed; the guard counts only new removals
 LEGACY_TODO = "regen_study_todo.json"  # the old, NEW-only queue that went stale
 
 
@@ -87,6 +90,17 @@ def write_study_queue(queue, generated):
             pass
 
 
+def _prune_key(entry):
+    return (entry.get("kind") or "", nkey(entry.get("id") or entry.get("name")))
+
+
+def _pruned_last():
+    try:
+        return {tuple(k) for k in fileio.read_json(work_path(PRUNED_LAST))}
+    except (OSError, ValueError, TypeError):
+        return set()
+
+
 def main():
     flags = set(sys.argv[1:])
     rc, out = run_here("enumerate_arsenal.py")
@@ -104,6 +118,12 @@ def main():
     print(f"  unchanged: {unchanged}")
     print(f"  NEW (need study): {len(added)}")
     print(f"  REMOVED (uninstalled): {len(removed)}")
+    now = LiveSet(live)
+    shared = [i.get("id") or i.get("name") for i in removed if now.shared(i)]
+    if shared:
+        print(f"    of which {len(shared)} have a name now shared by several live skills; "
+              f"study each as plugin:skill: {', '.join(map(str, shared[:10]))}"
+              + (" ..." if len(shared) > 10 else ""))
 
     plan = {"generated": datetime.datetime.now().isoformat(timespec="seconds"),
             "live_total": len(live), "studied_total": len(studied), "unchanged": unchanged,
@@ -116,11 +136,14 @@ def main():
         print(f"  -> wrote {STUDY_QUEUE} ({len(queue)} items)")
 
     prunable = [i for i in removed if i.get("kind") != "model"]
-    frac = len(prunable) / len(studied) if studied else 0.0
+    # assemble restores every batch entry each week, so a removal the last prune already
+    # made shows up again; only removals that are new since then count toward the guard.
+    fresh = [i for i in prunable if _prune_key(i) not in _pruned_last()]
+    frac = len(fresh) / len(studied) if studied else 0.0
     if ("--prune" in flags and "--force-prune" not in flags
-            and len(prunable) >= PRUNE_GUARD_MIN and frac > PRUNE_GUARD_FRAC):
-        print(f"  PRUNE REFUSED: {len(prunable)}/{len(studied)} studied items ({frac:.0%}) "
-              f"would be dropped — that shape usually means the LIVE enumeration collapsed, "
+            and len(fresh) >= PRUNE_GUARD_MIN and frac > PRUNE_GUARD_FRAC):
+        print(f"  PRUNE REFUSED: {len(fresh)}/{len(studied)} studied items ({frac:.0%}) "
+              f"would newly be dropped — that shape usually means the LIVE enumeration collapsed, "
               f"not a mass uninstall. Check scan.skill_roots, then rerun with --force-prune "
               f"if the removals are real.")
     elif "--prune" in flags and prunable and studied:
@@ -136,6 +159,7 @@ def main():
         shutil.copy2(path, path + ".bak")
         payload = catalog_file.write(path, kept)
         fileio.write_text(work_path("ARSENAL.md"), render_md(kept, payload["generated"]))
+        fileio.write_json(work_path(PRUNED_LAST), sorted({_prune_key(i) for i in prunable}))
         print(f"  PRUNED {len(prunable)} items -> arsenal.json ({len(kept)} left, .bak written)")
 
     status = 0

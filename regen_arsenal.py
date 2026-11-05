@@ -25,7 +25,7 @@ import sys
 import catalog_file
 from config import cfg, work_path
 from entry import render_md
-from matching import contains, nkey
+from matching import LiveSet, keys_of
 
 PY = sys.executable
 
@@ -42,24 +42,12 @@ def run_here(script, *args):
 
 
 def diff(live, studied):
-    studied_slugs = {}
-    for it in studied:
-        for k in {nkey(it.get("name")), nkey(it.get("id"))}:
-            if k:
-                studied_slugs.setdefault(k, it)
-    live_slugs = {nkey(it.get("name")): it for it in live if nkey(it.get("name"))}
-
-    added = [it for s, it in live_slugs.items()
-             if s not in studied_slugs
-             and not (it.get("kind") == "model" and contains(s, list(studied_slugs)))]
-    removed = []
-    for it in studied:
-        kn, ki = nkey(it.get("name")), nkey(it.get("id"))
-        if kn in live_slugs or ki in live_slugs:
-            continue
-        if it.get("kind") == "model" and (contains(kn, list(live_slugs)) or contains(ki, list(live_slugs))):
-            continue
-        removed.append(it)
+    """(added, removed, unchanged) between the live inventory and the studied catalog,
+    by tool identity (see matching.LiveSet): kind-aware, plugin skills as plugin:skill."""
+    now = LiveSet(live)
+    known = keys_of(studied)
+    added = [it for it in now.items if not now.known(it, known)]
+    removed = [it for it in studied if not now.covers(it)]
     return added, removed, len(studied) - len(removed)
 
 
@@ -100,7 +88,7 @@ def main():
               f"not a mass uninstall. Check scan.skill_roots, then rerun with --force-prune "
               f"if the removals are real.")
     elif "--prune" in flags and prunable and studied:
-        rm = {nkey(i.get("name")) for i in prunable} | {nkey(i.get("id")) for i in prunable}
+        now = LiveSet(live)
         path = work_path("arsenal.json")
         # Structural fix: prune through the catalog_file owner so the header
         # (count/by_tier/by_kind/generated) is recomputed instead of patched in place -
@@ -108,7 +96,7 @@ def main():
         # are the same as before; only the header is now consistent. ARSENAL.md is also
         # regenerated (the old prune left it stale).
         _, entries = catalog_file.parse(path)
-        kept = [e for e in entries if nkey(e.name) not in rm and nkey(e.id) not in rm]
+        kept = [e for e in entries if e.kind == "model" or now.covers(e)]
         shutil.copy2(path, path + ".bak")
         payload = catalog_file.write(path, kept)
         with open(work_path("ARSENAL.md"), "w", encoding="utf-8") as f:

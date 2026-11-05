@@ -39,7 +39,7 @@ def test_registry_gate_drops_orphan_marketplace_clones(tmp_path):
     marketplaces parent are untouched. Guards the 2026-07-19 temp_* sweep."""
     mkts = tmp_path / "marketplaces"
     good = _mkskill(mkts / "registered-mkt" / "skills" / "good", "good")
-    orphan = _mkskill(mkts / "temp_1783969352387" / "skills" / "react-doctor", "react-doctor")
+    orphan = _mkskill(mkts / "temp_123" / "skills" / "react-doctor", "react-doctor")
     outside = _mkskill(tmp_path / "cache" / "plug" / "skills" / "cached", "cached")
 
     keep = enumerate_arsenal.registry_gate(_registry(tmp_path, mkts / "registered-mkt"))
@@ -64,9 +64,9 @@ def test_registry_gate_is_noop_without_a_readable_registry(tmp_path):
 def test_registry_gate_never_gates_a_tree_outside_the_marketplaces_dir(tmp_path):
     """A directory-source marketplace can be registered from ANYWHERE on disk, so the
     gated zone must be the marketplaces dir beside the registry - not the parent of each
-    installLocation. The live registry has an entry pointing at F:\\ai\\dir-marketplace;
-    parent-inference made F:\\ai a gate zone, so every skill in a sibling project there
-    dropped out of LIVE and became prune bait on the next weekly run."""
+    installLocation. With parent-inference, a marketplace registered from one folder of a
+    projects folder made the whole projects folder a gate zone, so every skill in a
+    sibling project there dropped out of LIVE and became prune bait on the next weekly run."""
     mkts = tmp_path / "marketplaces"
     registered = _mkskill(mkts / "registered-mkt" / "skills" / "good", "good")
     projects = tmp_path / "projects"
@@ -109,7 +109,7 @@ def test_registry_gate_announces_when_it_turns_itself_off(tmp_path, capsys):
 def test_find_skills_applies_the_keep_predicate(tmp_path):
     mkts = tmp_path / "marketplaces"
     _mkskill(mkts / "registered-mkt" / "skills" / "good", "good")
-    _mkskill(mkts / "temp_1783969352387" / "skills" / "react-doctor", "react-doctor")
+    _mkskill(mkts / "temp_123" / "skills" / "react-doctor", "react-doctor")
     keep = enumerate_arsenal.registry_gate(_registry(tmp_path, mkts / "registered-mkt"))
     names = {s["name"] for s in enumerate_arsenal.find_skills([str(mkts)], keep)}
     assert names == {"good"}
@@ -120,7 +120,7 @@ def test_find_skills_applies_the_keep_predicate(tmp_path):
 def test_enumerate_gates_orphans_when_registry_configured(qm_env, tmp_path):
     mkts = tmp_path / "marketplaces"
     _mkskill(mkts / "registered-mkt" / "skills" / "good", "good")
-    _mkskill(mkts / "temp_1783969352387" / "skills" / "react-doctor", "react-doctor")
+    _mkskill(mkts / "temp_123" / "skills" / "react-doctor", "react-doctor")
     config.cfg()["scan"]["skill_roots"] = [str(mkts)]
     config.cfg()["scan"]["marketplaces_registry"] = _registry(tmp_path, mkts / "registered-mkt")
     enumerate_arsenal.main()

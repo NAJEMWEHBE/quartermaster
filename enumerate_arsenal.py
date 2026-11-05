@@ -129,15 +129,15 @@ def registry_gate(registry_path):
 
     The gated zone is the `marketplaces` dir sitting BESIDE the registry file - never the
     parent of each registered installLocation. Directory-source marketplaces may be
-    registered from anywhere on disk (a live entry here points at F:\\ai\\dir-marketplace),
-    so parent-inference promoted whole project trees into gate zones: every skill in such
+    registered from anywhere on disk (say, one folder inside a projects folder), so
+    parent-inference promoted whole project trees into gate zones: every skill in such
     a tree outside the one registered dir vanished from LIVE and became prune bait.
 
     Fails OPEN (predicate always True, warning on stderr) whenever the registry is unset,
     unreadable or malformed, so this only ever removes provable orphans.
 
-    2026-07-19: widening the scan root to plugins/marketplaces swept in temp_1783969352387
-    (improve-react, react-doctor) - this gate is the structural fix for that class."""
+    2026-07-19: widening the scan root to plugins/marketplaces swept in a leftover
+    temp_* clone and its skills - this gate is the structural fix for that class."""
     path = os.path.expanduser(registry_path)
     try:
         with open(path, encoding="utf-8") as f:

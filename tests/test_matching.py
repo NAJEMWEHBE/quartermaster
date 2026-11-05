@@ -30,6 +30,7 @@ def test_contains_model_fuzzy():
     assert matching.contains("qwen3-embedding", ["nomic-embed-text"]) is False
 
 
-def test_dedup_key_casefold():
-    assert matching.dedup_key("Foo") == "foo"
-    assert matching.dedup_key("BAR-BAZ") == "bar-baz"
+def test_dedup_key_casefold_and_kind_aware():
+    assert matching.dedup_key("skill", "Foo") == matching.dedup_key("skill", "foo")
+    assert matching.dedup_key("skill", "BAR-BAZ") == matching.dedup_key("skill", "bar-baz")
+    assert matching.dedup_key("skill", "foo") != matching.dedup_key("plugin", "foo")

@@ -2,17 +2,19 @@
 """Diff the LIVE arsenal against the studied catalog; optionally prune + rebuild index.
 
 Modes:
-  python regen_arsenal.py                    # diff only (read-only). writes regen_plan.json
-                                             # + regen_study_todo.json when new items exist
+  python regen_arsenal.py                    # diff only. writes regen_plan.json, and
+                                             # study_queue.json while anything is unstudied
   python regen_arsenal.py --prune            # also drop REMOVED items from arsenal.json (+.bak)
-  python regen_arsenal.py --rebuild-index    # also run build_index.py
+  python regen_arsenal.py --rebuild-index    # also run build_index.py (exit 4 if it fails)
   python regen_arsenal.py --prune --force-prune   # override the mass-prune guard
 Models are never auto-pruned (their tag matching is fuzzy).
-A prune that would drop >= PRUNE_GUARD_MIN items AND > PRUNE_GUARD_FRAC of the studied
-catalog is refused without --force-prune: that shape almost always means the LIVE
+A prune that would newly drop >= PRUNE_GUARD_MIN items AND > PRUNE_GUARD_FRAC of the
+studied catalog is refused without --force-prune: that shape almost always means the LIVE
 enumeration collapsed (unmounted root, swept plugin cache), not a real mass uninstall
 (2026-07-19: a harness cache sweep read as 129 uninstalls and gutted the catalog).
-After NEW items appear: have your agent study regen_study_todo.json (see prompts/study-agent.md),
+"Newly" means not removed by the last prune (pruned_last.json): assemble brings pruned
+entries back every week, and one accepted --force-prune must not be refused again.
+While study_queue.json exists: have your agent study it (see prompts/study-agent.md),
 then run assemble_catalog.py, then this with --prune --rebuild-index.
 """
 import datetime
@@ -23,11 +25,16 @@ import subprocess
 import sys
 
 import catalog_file
+import fileio
 from config import cfg, work_path
-from entry import render_md
-from matching import contains, nkey
+from entry import Entry, is_stub, render_md
+from matching import LiveSet, keys_of, nkey
 
 PY = sys.executable
+
+# Exit codes: 0 ok | 1 enumerate failed (nothing changed) | 4 the catalog step finished but
+# the index build failed, so semantic search still uses the old index (query's INDEX-STALE).
+EXIT_INDEX_FAILED = 4
 
 # Mass-prune circuit breaker: both must hold for a refusal, so small catalogs (and the
 # test fixtures) always prune freely while a collapse-shaped prune needs --force-prune.
@@ -42,25 +49,56 @@ def run_here(script, *args):
 
 
 def diff(live, studied):
-    studied_slugs = {}
-    for it in studied:
-        for k in {nkey(it.get("name")), nkey(it.get("id"))}:
-            if k:
-                studied_slugs.setdefault(k, it)
-    live_slugs = {nkey(it.get("name")): it for it in live if nkey(it.get("name"))}
-
-    added = [it for s, it in live_slugs.items()
-             if s not in studied_slugs
-             and not (it.get("kind") == "model" and contains(s, list(studied_slugs)))]
-    removed = []
-    for it in studied:
-        kn, ki = nkey(it.get("name")), nkey(it.get("id"))
-        if kn in live_slugs or ki in live_slugs:
-            continue
-        if it.get("kind") == "model" and (contains(kn, list(live_slugs)) or contains(ki, list(live_slugs))):
-            continue
-        removed.append(it)
+    """(added, removed, unchanged) between the live inventory and the studied catalog,
+    by tool identity (see matching.LiveSet): kind-aware, plugin skills as plugin:skill."""
+    now = LiveSet(live)
+    known = keys_of(studied)
+    added = [it for it in now.items if not now.known(it, known)]
+    removed = [it for it in studied if not now.covers(it)]
     return added, removed, len(studied) - len(removed)
+
+
+STUDY_QUEUE = "study_queue.json"
+PRUNED_LAST = "pruned_last.json"  # what the last prune removed; the guard counts only new removals
+LEGACY_TODO = "regen_study_todo.json"  # the old, NEW-only queue that went stale
+
+
+def study_queue(live, studied):
+    """Every live tool with no deep entry yet (new ones and stubbed ones alike), each with
+    the id its entry should get and what a study agent reads: desc and source path."""
+    now = LiveSet(live)
+    deep = keys_of(e for e in studied if not is_stub(e))
+    queue = []
+    for it in now.items:
+        if not now.known(it, deep):
+            queue.append({"id": Entry.make_stub(it).id, **it})
+    return queue
+
+
+def write_study_queue(queue, generated):
+    """Rewrite study_queue.json from scratch every run; no file when nothing is pending."""
+    stale = [LEGACY_TODO]
+    if queue:
+        fileio.write_json(work_path(STUDY_QUEUE),
+                          {"generated": generated, "count": len(queue), "items": queue})
+    else:
+        stale.append(STUDY_QUEUE)
+    for name in stale:
+        try:
+            os.remove(work_path(name))
+        except FileNotFoundError:
+            pass
+
+
+def _prune_key(entry):
+    return (entry.get("kind") or "", nkey(entry.get("id") or entry.get("name")))
+
+
+def _pruned_last():
+    try:
+        return {tuple(k) for k in fileio.read_json(work_path(PRUNED_LAST))}
+    except (OSError, ValueError, TypeError):
+        return set()
 
 
 def main():
@@ -69,9 +107,9 @@ def main():
     if rc != 0:
         print("ERROR: enumerate failed:", out[-300:])
         return 1
-    live = json.load(open(work_path("arsenal_items.json"), encoding="utf-8")).get("items", [])
+    live = fileio.read_json(work_path("arsenal_items.json")).get("items", [])
     try:
-        studied = json.load(open(work_path("arsenal.json"), encoding="utf-8")).get("items", [])
+        studied = fileio.read_json(work_path("arsenal.json")).get("items", [])
     except (OSError, json.JSONDecodeError):
         studied = []
 
@@ -80,27 +118,36 @@ def main():
     print(f"  unchanged: {unchanged}")
     print(f"  NEW (need study): {len(added)}")
     print(f"  REMOVED (uninstalled): {len(removed)}")
+    now = LiveSet(live)
+    shared = [i.get("id") or i.get("name") for i in removed if now.shared(i)]
+    if shared:
+        print(f"    of which {len(shared)} have a name now shared by several live skills; "
+              f"study each as plugin:skill: {', '.join(map(str, shared[:10]))}"
+              + (" ..." if len(shared) > 10 else ""))
 
     plan = {"generated": datetime.datetime.now().isoformat(timespec="seconds"),
             "live_total": len(live), "studied_total": len(studied), "unchanged": unchanged,
             "added": added,
             "removed": [{"id": i.get("id"), "name": i.get("name"), "kind": i.get("kind")} for i in removed]}
-    json.dump(plan, open(work_path("regen_plan.json"), "w", encoding="utf-8"), indent=2, ensure_ascii=False)
-    if added:
-        json.dump({"items": added}, open(work_path("regen_study_todo.json"), "w", encoding="utf-8"),
-                  indent=2, ensure_ascii=False)
-        print(f"  -> wrote regen_study_todo.json ({len(added)} items)")
+    fileio.write_json(work_path("regen_plan.json"), plan)
+    queue = study_queue(live, studied)
+    write_study_queue(queue, plan["generated"])
+    if queue:
+        print(f"  -> wrote {STUDY_QUEUE} ({len(queue)} items)")
 
     prunable = [i for i in removed if i.get("kind") != "model"]
-    frac = len(prunable) / len(studied) if studied else 0.0
+    # assemble restores every batch entry each week, so a removal the last prune already
+    # made shows up again; only removals that are new since then count toward the guard.
+    fresh = [i for i in prunable if _prune_key(i) not in _pruned_last()]
+    frac = len(fresh) / len(studied) if studied else 0.0
     if ("--prune" in flags and "--force-prune" not in flags
-            and len(prunable) >= PRUNE_GUARD_MIN and frac > PRUNE_GUARD_FRAC):
-        print(f"  PRUNE REFUSED: {len(prunable)}/{len(studied)} studied items ({frac:.0%}) "
-              f"would be dropped — that shape usually means the LIVE enumeration collapsed, "
+            and len(fresh) >= PRUNE_GUARD_MIN and frac > PRUNE_GUARD_FRAC):
+        print(f"  PRUNE REFUSED: {len(fresh)}/{len(studied)} studied items ({frac:.0%}) "
+              f"would newly be dropped — that shape usually means the LIVE enumeration collapsed, "
               f"not a mass uninstall. Check scan.skill_roots, then rerun with --force-prune "
               f"if the removals are real.")
     elif "--prune" in flags and prunable and studied:
-        rm = {nkey(i.get("name")) for i in prunable} | {nkey(i.get("id")) for i in prunable}
+        now = LiveSet(live)
         path = work_path("arsenal.json")
         # Structural fix: prune through the catalog_file owner so the header
         # (count/by_tier/by_kind/generated) is recomputed instead of patched in place -
@@ -108,22 +155,24 @@ def main():
         # are the same as before; only the header is now consistent. ARSENAL.md is also
         # regenerated (the old prune left it stale).
         _, entries = catalog_file.parse(path)
-        kept = [e for e in entries if nkey(e.name) not in rm and nkey(e.id) not in rm]
+        kept = [e for e in entries if e.kind == "model" or now.covers(e)]
         shutil.copy2(path, path + ".bak")
         payload = catalog_file.write(path, kept)
-        with open(work_path("ARSENAL.md"), "w", encoding="utf-8") as f:
-            f.write(render_md(kept, payload["generated"]))
+        fileio.write_text(work_path("ARSENAL.md"), render_md(kept, payload["generated"]))
+        fileio.write_json(work_path(PRUNED_LAST), sorted({_prune_key(i) for i in prunable}))
         print(f"  PRUNED {len(prunable)} items -> arsenal.json ({len(kept)} left, .bak written)")
 
+    status = 0
     if "--rebuild-index" in flags:
         rc, out = run_here("build_index.py")
         print(f"  build_index.py: {'ok' if rc == 0 else 'FAILED'}")
         if rc != 0:
             print(out[-300:])
+            status = EXIT_INDEX_FAILED
 
     if not added and not removed:
         print("CATALOG FRESH - no changes since last study.")
-    return 0
+    return status
 
 
 if __name__ == "__main__":

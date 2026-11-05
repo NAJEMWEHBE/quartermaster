@@ -16,7 +16,7 @@ Readers never re-derive any of this; they import it.
 """
 import collections
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 
 import matching
 
@@ -26,12 +26,30 @@ FIELDS = ["id", "kind", "name", "what", "use_when", "avoid_when", "offline",
           "cost", "pairs_with", "supersedes", "triggers", "example", "tier", "route_patterns"]
 LIST_FIELDS = {"pairs_with", "supersedes", "triggers", "route_patterns"}
 
+# Ends the `what` of every placeholder entry; a tool whose entry carries it is unstudied.
+STUB_MARK = "[STUB - not yet deep-studied]"
 
-class Tier(StrEnum):
-    """Catalog tier. Serializes as a plain string (StrEnum)."""
+
+def is_stub(entry):
+    """True for a placeholder entry (dict or Entry), i.e. one still waiting for study."""
+    what = entry.get("what") if isinstance(entry, dict) else getattr(entry, "what", "")
+    return str(what or "").endswith(STUB_MARK)
+
+
+class Tier(str, Enum):
+    """Catalog tier. A str subclass that prints and serializes as its plain value.
+
+    (str, Enum) plus __str__/__format__ instead of StrEnum, which needs Python 3.11:
+    the engine supports 3.10+."""
     route = "route"      # core daily driver (rare); route_patterns are salience markers only
     catalog = "catalog"  # clearly useful
     lite = "lite"        # long-tail / stubs
+
+    def __str__(self):
+        return self.value
+
+    def __format__(self, spec):
+        return format(self.value, spec)
 
     @classmethod
     def coerce(cls, v):
@@ -101,12 +119,13 @@ class Entry:
     @classmethod
     def make_stub(cls, item):
         """Placeholder record for a newly-enumerated, not-yet-deep-studied tool (was
-        weekly.make_stub). item is a raw enumeration dict with name/kind/desc."""
+        weekly.make_stub). item is a raw enumeration dict with name/kind/desc, and
+        `invoke` for skills (plugin skills: plugin:skill), which becomes the stub's name."""
         desc = (item.get("desc") or "").strip()
-        name = item.get("name") or "unknown"
+        name = item.get("invoke") or item.get("name") or "unknown"
         return cls(
             id=matching.slug(name), kind=item.get("kind", "skill"), name=name,
-            what=(desc[:240] or f"{name} (no description found)") + " [STUB - not yet deep-studied]",
+            what=(desc[:240] or f"{name} (no description found)") + " " + STUB_MARK,
             use_when=(f"Possibly relevant when the need matches: {desc[:160]}" if desc
                       else "Unknown until studied."),
             avoid_when="Stub entry pending deep study - details unverified; confirm against the tool itself before relying on it.",

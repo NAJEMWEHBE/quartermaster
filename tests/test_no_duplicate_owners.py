@@ -40,8 +40,7 @@ def test_scripts_import_owners_not_redefine():
 
     # names that are legitimately imported must BE the owner's object (not a redefinition)
     assert weekly.nkey is matching.nkey
-    assert regen_arsenal.nkey is matching.nkey
-    assert regen_arsenal.contains is matching.contains
+    assert regen_arsenal.LiveSet is matching.LiveSet
     assert build_index.embed_text is entry.embed_text
     assert query_arsenal.offline_label is entry.offline_label
     assert assemble_catalog.dedup_key is matching.dedup_key

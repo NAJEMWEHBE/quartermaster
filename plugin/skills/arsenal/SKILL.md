@@ -22,8 +22,8 @@ The engine is wherever the owner cloned the repo. Find it, in order:
 The engine's scripts read their config from the `QUARTERMASTER_CONFIG` environment
 variable (falling back to `quartermaster.config.json` beside the scripts). If the owner
 keeps their data outside the clone, `QUARTERMASTER_CONFIG` must point at their config —
-suggest setting it user-wide alongside `QUARTERMASTER_DIR`. Exit code 2 with
-CATALOG-UNAVAILABLE means the config resolved to a work dir with no `arsenal.json`.
+suggest setting it user-wide alongside `QUARTERMASTER_DIR`. Exit code 3
+(CATALOG-UNAVAILABLE) means the config resolved to a work dir with no `arsenal.json`.
 
 If no clone exists anywhere: the catalog hasn't been set up. Point them at the repo's
 README quick start instead of guessing answers.
@@ -47,11 +47,19 @@ python <ENGINE_DIR>/query_arsenal.py --explain <tool-id>
 Forgiving lookup (substring match, lists candidates when ambiguous). Explain simply —
 plain words first, then the avoid_when so the owner knows the boundaries.
 
-## Degrade path (exit code 2 = embedding down)
+## Exit codes
 
-If the script reports EMBEDDING-UNAVAILABLE, do NOT give up: read `arsenal.json` in the
-engine's work dir directly (fields: id/what/use_when/avoid_when/triggers/tier) and answer
-from that. Say semantic search was down.
+Each code has one meaning and one action:
+
+| code | label | do this |
+|---|---|---|
+| 0 | | present the results |
+| 1 | usage, or numpy missing (message says which) | fix the call, or use `--explain <id>` / read `arsenal.json`, which need no numpy |
+| 2 | EMBEDDING-UNAVAILABLE | read `arsenal.json` (path printed) and answer from it; say semantic search was down |
+| 3 | CATALOG-UNAVAILABLE | no catalog: check `QUARTERMASTER_CONFIG` / `work_dir`, or point the owner at the README quick start |
+| 4 | INDEX-STALE | read `arsenal.json` (path printed) and answer from it; tell the owner to run `regen_arsenal.py --rebuild-index` |
+
+When reading `arsenal.json` directly, use the fields id/what/use_when/avoid_when/triggers/tier.
 
 ## Known limits (be honest about them)
 

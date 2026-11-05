@@ -7,11 +7,11 @@ Build-time only; query_arsenal.py degrades gracefully when the index or Ollama i
 Requires numpy.
 """
 import datetime
-import json
 
 import numpy as np
 
 import catalog_file
+import fileio
 from config import cfg, embed, work_path
 from entry import embed_text
 
@@ -39,14 +39,16 @@ def main():
     for s in range(0, len(texts), B):
         vecs.extend(embed(texts[s:s + B]))
     arr = np.asarray(vecs, dtype=np.float32)
-    np.savez(work_path("arsenal_index.npz"), vecs=arr)
+    # Vectors first, then meta: a query in between sees a count mismatch and reports
+    # INDEX-STALE instead of ranking against the wrong ids.
+    fileio.write_with(work_path("arsenal_index.npz"), lambda f: np.savez(f, vecs=arr), mode="wb")
     meta = {"generated": datetime.datetime.now().isoformat(timespec="seconds"),
             "model": cfg().get("embed", {}).get("model"), "dim": int(arr.shape[1]),
             "count": len(items), "source": "arsenal.json",
-            "ids": [e.id for e in items], "names": [invoke_name(e) for e in items],
+            "ids": [e.id for e in items], "kinds": [e.kind for e in items],
+            "names": [invoke_name(e) for e in items],
             "tiers": [str(e.tier) for e in items]}
-    with open(work_path("arsenal_index.meta.json"), "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=1, ensure_ascii=False)
+    fileio.write_json(work_path("arsenal_index.meta.json"), meta, indent=1)
     print(f"wrote arsenal_index.npz ({arr.shape[0]}x{arr.shape[1]}) + meta")
     return 0
 

@@ -141,3 +141,18 @@ def test_unreachable_embedder_is_embedding_unavailable(qm_env, monkeypatch, caps
     rc, out = _query(monkeypatch, capsys, down, "foo")
     assert rc == 2 and "EMBEDDING-UNAVAILABLE" in out.err
     assert "arsenal.json" in out.out
+
+
+def test_a_model_that_was_never_pulled_is_named(qm_env, monkeypatch, capsys):
+    """Ollama answers 404 for an unknown model; that's a missing pull, not a down server."""
+    import io
+    import urllib.error
+    _built_index(qm_env, monkeypatch, capsys)
+
+    def not_pulled(texts, timeout=120):
+        raise urllib.error.HTTPError("http://127.0.0.1:11434/api/embed", 404, "Not Found", {},
+                                     io.BytesIO(b'{"error":"model not found"}'))
+
+    rc, out = _query(monkeypatch, capsys, not_pulled, "foo")
+    assert rc == 2 and "EMBEDDING-UNAVAILABLE" in out.err
+    assert "ollama pull qwen3-embedding:0.6b" in out.out

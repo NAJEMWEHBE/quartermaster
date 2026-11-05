@@ -93,6 +93,7 @@ class LiveSet:
             if a[1]:
                 aliases.setdefault(a, []).append(it)
         self._alias = {a: its[0] for a, its in aliases.items() if len(its) == 1}
+        self._shared = {a for a, its in aliases.items() if len(its) > 1}
         self._models = [k[1] for k in self.by_key if k[0] == "model"]
         self._kinds = {k[0] for k in self.by_key}
 
@@ -114,6 +115,11 @@ class LiveSet:
         if self.matched_by(keys):
             return True
         return any(kind == "model" and contains(k, self._models) for kind, k in keys)
+
+    def shared(self, entry):
+        """True if the entry's bare name now belongs to several live skills (say two
+        plugins' `access`), so it identifies none of them and needs re-study."""
+        return bool(_expand(entry_keys(entry), self._kinds) & self._shared)
 
     def known(self, item, keys):
         """True if `keys` (from catalog entries) already identify this live item."""

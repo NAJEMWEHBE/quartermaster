@@ -1,6 +1,5 @@
 {
   "name": "quartermaster",
-  "version": "1.0.0",
   "description": "Quartermaster - your agent studies every tool you have, so you don't have to remember them",
   "owner": {
     "name": "Najem Wehbe",
@@ -9,9 +8,8 @@
   "plugins": [
     {
       "name": "quartermaster",
-      "version": "1.0.0",
-      "source": "./plugin",
-      "description": "The /arsenal skill: answer \"what do I have for X?\" from your studied tool catalog."
+      "source": "./",
+      "description": "The arsenal skill: answer \"what do I have for X?\" from your studied tool catalog."
     }
   ]
 }

@@ -1,0 +1,16 @@
+{
+  "name": "quartermaster",
+  "description": "The arsenal skill: answer \"what do I have for X?\" from your studied tool catalog. Bundles the engine that builds the catalog.",
+  "version": "1.1.0",
+  "author": {
+    "name": "Najem Wehbe",
+    "url": "https://github.com/NAJEMWEHBE"
+  },
+  "homepage": "https://github.com/NAJEMWEHBE/quartermaster",
+  "repository": "https://github.com/NAJEMWEHBE/quartermaster",
+  "license": "MIT",
+  "keywords": ["skills", "catalog", "semantic-search", "ollama"],
+  "skills": [
+    "./skills/arsenal"
+  ]
+}

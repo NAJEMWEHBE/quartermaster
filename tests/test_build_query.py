@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Index build + query through the CLI seam, with a fake in-process embedder (no
 network, no Ollama)."""
+import datetime
 import json
 import re
 import urllib.error
@@ -10,7 +11,7 @@ from quartermaster import cli, index
 from quartermaster.entry import Entry
 
 # a tiny deterministic bag-of-words 'embedder' over a fixed vocab
-VOCAB = ["foo", "bar", "baz", "route", "embed", "test", "widget", "need"]
+VOCAB = ["foo", "bar", "baz", "route", "embed", "test", "widget", "need", "second", "agent"]
 
 
 def bag_of_words(texts):
@@ -54,7 +55,54 @@ def test_build_index_and_query(qm_env, capsys):
     assert "Foo" in out.out and "Arsenal matches for: foo" in out.out
 
 
+def test_every_kind_is_indexed_and_found(qm_env, capsys):
+    """'Which agent ...' must be able to match an agent, not only skills."""
+    _built_index(qm_env, capsys)
+    meta = json.loads((qm_env / "arsenal_index.meta.json").read_text(encoding="utf-8"))
+    assert set(meta["kinds"]) == {"skill", "plugin", "model", "agent"}
+    assert ("agent", "second") in set(zip(meta["kinds"], meta["ids"]))
 
+    rc, out = _query(capsys, fake_embed, "second agent")
+    assert rc == 0
+    assert "## Second  `agent`" in out.out
+
+
+def test_results_show_how_to_invoke_a_skill(qm_env, capsys):
+    write_json(qm_env / "entries" / "batch-00-plugin.json", [
+        {"id": "pr-widget", "kind": "skill", "name": "toolkit:pr-widget", "what": "widget widget",
+         "use_when": "widget", "avoid_when": "a", "tier": "catalog"}])
+    _built_index(qm_env, capsys)
+    rc, out = _query(capsys, fake_embed, "widget")
+    assert rc == 0
+    assert "**Invoke:** `/toolkit:pr-widget`" in out.out
+
+
+def test_results_say_how_old_the_catalog_is(qm_env, capsys):
+    _built_index(qm_env, capsys)
+    rc, out = _query(capsys, fake_embed, "foo")
+    assert "catalog generated" in out.out and "days old" not in out.out
+
+    cat = json.loads((qm_env / "arsenal.json").read_text(encoding="utf-8"))
+    cat["generated"] = (datetime.datetime.now() - datetime.timedelta(days=30)).isoformat(timespec="seconds")
+    write_json(qm_env / "arsenal.json", cat)
+    rc, out = _query(capsys, fake_embed, "foo")
+    assert rc == 0 and "Catalog is 30 days old" in out.out
+
+
+def test_query_instruction_is_opt_in(qm_env, capsys):
+    seen = []
+    spy = FakeEmbedder(lambda texts: (seen.extend(texts), bag_of_words(texts))[1])
+    _built_index(qm_env, capsys)
+    _query(capsys, spy, "foo")
+    assert seen == ["foo"]  # default: the query as typed
+
+    cfg_path = qm_env.parent / "quartermaster.config.json"
+    c = json.loads(cfg_path.read_text(encoding="utf-8"))
+    c["embed"]["query_instruction"] = "Find the installed tool for this need"
+    write_json(cfg_path, c)
+    seen.clear()
+    _query(capsys, spy, "foo")
+    assert seen == ["Instruct: Find the installed tool for this need\nQuery: foo"]
 
 
 def test_query_missing_catalog_degrades(qm_env, capsys):

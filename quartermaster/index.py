@@ -33,8 +33,9 @@ def invoke_name(entry):
 
 
 def indexed(entries):
-    """The entries the index covers."""
-    return [e for e in entries if e.kind == "skill"]
+    """The entries the index covers: every kind (skills, plugins, agents, MCP servers,
+    models), so "which agent reviews code" can match as well as a skill can."""
+    return list(entries)
 
 
 @dataclass
@@ -60,7 +61,7 @@ def build(ws, entries, embed):
     import numpy as np
     items = indexed(entries)
     if not items:
-        raise ValueError("no skill entries in the catalog - nothing to index")
+        raise ValueError("the catalog has no entries - nothing to index")
     texts = [embed_text(e) for e in items]
     vecs = []
     for s in range(0, len(texts), BATCH):

@@ -2,7 +2,8 @@
 """Shared config + embedding helpers for Quartermaster.
 
 All scripts read quartermaster.config.json from this directory (or the path in
-the QUARTERMASTER_CONFIG environment variable). See README for the schema.
+the QUARTERMASTER_CONFIG environment variable). A relative work_dir is resolved
+against the config file's folder. See README for the schema.
 """
 import json
 import os
@@ -20,7 +21,11 @@ def cfg():
     if _cfg is None:
         with open(CONFIG_PATH, encoding="utf-8") as f:
             _cfg = json.load(f)
-        _cfg["work_dir"] = os.path.abspath(os.path.expanduser(_cfg["work_dir"]))
+        # A relative work_dir is relative to the config file, never to the current
+        # folder: the /arsenal skill and schedulers run the scripts from anywhere.
+        base = os.path.dirname(os.path.abspath(CONFIG_PATH))
+        _cfg["work_dir"] = os.path.normpath(
+            os.path.join(base, os.path.expanduser(_cfg["work_dir"])))
     return _cfg
 
 

@@ -30,9 +30,10 @@ def contains(k, keys):
     return any(len(k) >= 8 and len(o) >= 8 and (k in o or o in k) for o in keys)
 
 
-def dedup_key(entry_id):
-    """The catalog dedup key: case-folded id. First-loaded wins on a collision."""
-    return entry_id.lower()
+def dedup_key(kind, entry_id):
+    """The catalog dedup key: (kind, case-folded id). A plugin `foo` and its skill `foo`
+    are two entries. First-loaded wins on a collision."""
+    return (kind or "", entry_id.lower())
 
 
 # --- Tool identity: "is this catalog entry the same tool as that live item?" ---------

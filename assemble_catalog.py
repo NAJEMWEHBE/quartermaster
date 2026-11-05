@@ -50,9 +50,9 @@ def main():
     seen, items, dups = set(), [], []
     for src, e in raw:
         ent = Entry.from_raw(e)
-        key = dedup_key(ent.id)
+        key = dedup_key(ent.kind, ent.id)
         if key in seen:
-            dups.append(f"{key} (dup in {src}, kept first)")
+            dups.append(f"{ent.id} (dup in {src}, kept first; kind {ent.kind or '?'})")
             continue
         seen.add(key)
         items.append(ent)

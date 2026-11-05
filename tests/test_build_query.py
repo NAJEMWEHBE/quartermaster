@@ -62,3 +62,27 @@ def test_query_missing_catalog_degrades(qm_env, monkeypatch, capsys):
     err = capsys.readouterr()
     assert "CATALOG-UNAVAILABLE" in err.err
     assert "QUARTERMASTER_CONFIG" in err.out
+
+
+def test_query_returns_the_skill_not_a_same_id_plugin(qm_env, monkeypatch, capsys):
+    from conftest import write_json
+    write_json(qm_env / "entries" / "batch-00-kinds.json", [
+        {"id": "widget", "kind": "plugin", "name": "widget", "what": "PLUGIN-WIDGET",
+         "use_when": "u", "avoid_when": "a", "tier": "catalog"},
+        {"id": "widget", "kind": "skill", "name": "widget", "what": "SKILL-WIDGET",
+         "use_when": "widget widget", "avoid_when": "a", "tier": "catalog"},
+    ])
+    assemble_catalog.main()
+    monkeypatch.setattr(build_index, "embed", fake_embed)
+    assert build_index.main() == 0
+    monkeypatch.setattr(query_arsenal, "embed", fake_embed)
+    monkeypatch.setattr(sys, "argv", ["query_arsenal.py", "widget"])
+    capsys.readouterr()
+    assert query_arsenal.main() == 0
+    out = capsys.readouterr().out
+    assert "SKILL-WIDGET" in out and "PLUGIN-WIDGET" not in out
+
+    monkeypatch.setattr(sys, "argv", ["query_arsenal.py", "--explain", "widget"])
+    assert query_arsenal.main() == 0
+    out = capsys.readouterr().out
+    assert "SKILL-WIDGET" in out and "PLUGIN-WIDGET" in out  # one id, two tools: show both

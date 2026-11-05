@@ -22,8 +22,11 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 
 def load_catalog():
-    cat = json.load(open(work_path("arsenal.json"), encoding="utf-8"))
-    return {i["id"]: i for i in cat["items"]}
+    """{(kind, id): item}. Ids are unique per kind only: a plugin `foo` and its skill
+    `foo` are two entries."""
+    with open(work_path("arsenal.json"), encoding="utf-8") as f:
+        cat = json.load(f)
+    return {(i.get("kind", ""), i["id"]): i for i in cat["items"]}
 
 
 def fmt(entry, sim=None):
@@ -60,16 +63,19 @@ def main():
     min_sim = cfg().get("query", {}).get("min_sim", 0.60)
 
     if args.explain:
-        e = items.get(args.explain)
-        if not e:
+        hits = [v for (_, i), v in items.items() if i == args.explain]
+        if not hits:
             probe = args.explain.lower()
-            hits = [v for k, v in items.items() if probe in k or probe in str(v.get("name", "")).lower()]
-            if len(hits) == 1:
-                e = hits[0]
-            elif hits:
-                print(f"ambiguous '{args.explain}' - candidates: " + ", ".join(h["id"] for h in hits[:10]))
+            hits = [v for (_, i), v in items.items()
+                    if probe in i.lower() or probe in str(v.get("name", "")).lower()]
+            if len(hits) > 1:
+                print(f"ambiguous '{args.explain}' - candidates: "
+                      + ", ".join(f"{h['id']} ({h.get('kind', '?')})" for h in hits[:10]))
                 return 0
-        print(fmt(e) if e else f"no tool with id like '{args.explain}' in the catalog ({len(items)} items)")
+        if not hits:
+            print(f"no tool with id like '{args.explain}' in the catalog ({len(items)} items)")
+            return 0
+        print("\n\n".join(fmt(e) for e in hits))  # one id can name a plugin and its skill
         return 0
 
     q = " ".join(args.query).strip()
@@ -100,6 +106,7 @@ def main():
 
     order = sims.argsort()[::-1]
     ids = meta["ids"]
+    kinds = meta.get("kinds") or ["skill"] * len(ids)  # older indexes held skills only
 
     if args.sims:
         for i in order[: max(args.k, 15)]:
@@ -110,7 +117,7 @@ def main():
     for i in order:
         if sims[i] < min_sim or len(out) >= args.k:
             break
-        e = items.get(ids[i])
+        e = items.get((kinds[i], ids[i]))
         if e:
             out.append(fmt(e, sims[i]))
     if not out:

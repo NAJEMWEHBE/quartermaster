@@ -43,7 +43,8 @@ def main():
     meta = {"generated": datetime.datetime.now().isoformat(timespec="seconds"),
             "model": cfg().get("embed", {}).get("model"), "dim": int(arr.shape[1]),
             "count": len(items), "source": "arsenal.json",
-            "ids": [e.id for e in items], "names": [invoke_name(e) for e in items],
+            "ids": [e.id for e in items], "kinds": [e.kind for e in items],
+            "names": [invoke_name(e) for e in items],
             "tiers": [str(e.tier) for e in items]}
     with open(work_path("arsenal_index.meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=1, ensure_ascii=False)

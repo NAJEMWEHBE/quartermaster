@@ -46,3 +46,17 @@ def test_assemble_md_uses_live_field_order(qm_env):
     # the deliberate behavior alignment: Pairs with now precedes Example (live order)
     assert "- **Pairs with:** bar\n- **Example:** foo the widget" in md
     assert md.startswith("# Your Arsenal - what you have and when to use it")
+
+
+def test_a_plugin_and_its_same_named_skill_both_reach_the_catalog(qm_env):
+    from conftest import write_json
+    write_json(qm_env / "entries" / "batch-03-kinds.json", [
+        {"id": "widget", "kind": "plugin", "name": "widget", "what": "the plugin",
+         "use_when": "u", "avoid_when": "a", "tier": "catalog"},
+        {"id": "widget", "kind": "skill", "name": "widget", "what": "the skill",
+         "use_when": "u", "avoid_when": "a", "tier": "catalog"},
+    ])
+    assemble_catalog.main()
+    cat = json.loads(_load(qm_env / "arsenal.json"))
+    assert sorted((i["kind"], i["what"]) for i in cat["items"] if i["id"] == "widget") == \
+        [("plugin", "the plugin"), ("skill", "the skill")]

@@ -7,12 +7,13 @@ embedder, see embedder.py; default: Ollama from the config), so tests and other 
 run them in-process with no server.
 """
 import argparse
+import datetime
 import os
 import sys
 
 from . import catalog_file, config, index, inventory, pipeline, workspace
 from .embedder import OllamaEmbedder
-from .entry import offline_label
+from .entry import Entry, offline_label
 from .workspace import Workspace
 
 # query exit codes, one meaning each (SKILL.md maps each to one action)
@@ -21,6 +22,8 @@ EXIT_USAGE = 1
 EXIT_EMBEDDING_DOWN = 2   # no embedding server answered; arsenal.json is fine
 EXIT_NO_CATALOG = 3       # no readable arsenal.json in the work dir
 EXIT_INDEX_STALE = 4      # index missing, or built with another model or dimension
+
+STALE_AFTER_DAYS = 14
 
 
 def _utf8():
@@ -70,7 +73,7 @@ def assemble_main(argv=None):
 # --- build_index --------------------------------------------------------------------
 
 def build_index_main(argv=None, embed=None):
-    """Embed the catalog's skill entries with the configured model into the semantic index
+    """Embed every catalog entry with the configured model into the semantic index
     (arsenal_index.npz + arsenal_index.meta.json). Needs numpy and a running Ollama."""
     argparse.ArgumentParser(prog="build_index.py", description=build_index_main.__doc__).parse_args(argv)
     c, ws = _setup()
@@ -122,11 +125,20 @@ def weekly_main(argv=None, embed=None):
 
 # --- query --------------------------------------------------------------------------
 
+def _catalog_age(generated):
+    try:
+        return datetime.datetime.now() - datetime.datetime.fromisoformat(generated)
+    except (TypeError, ValueError):
+        return None
+
+
 def fmt(entry, sim=None):
     head = f"## {entry['name']}  `{entry['kind']}` / {entry['tier']}"
     if sim is not None:
         head += f"  (match {sim:.2f})"
     lines = [head, f"_{offline_label(entry.get('offline'))}, {entry.get('cost') or 'cost unknown'}_"]
+    if entry.get("kind") == "skill":
+        lines.append(f"- **Invoke:** `/{index.invoke_name(Entry.from_dict(entry))}`")
     for k, label in (("what", "What"), ("use_when", "Use when"), ("avoid_when", "Avoid when"),
                      ("example", "Example")):
         if entry.get(k):
@@ -175,6 +187,7 @@ def query_main(argv=None, embed=None):
         items = {(i.get("kind", ""), i["id"]): i for i in cat["items"]}
     except (OSError, ValueError, KeyError, TypeError) as e:
         return _no_catalog(ws, e)
+    generated = cat.get("generated")
 
     if a.explain:
         hits = [v for (_, i), v in items.items() if i == a.explain]
@@ -204,7 +217,9 @@ def query_main(argv=None, embed=None):
         return EXIT_USAGE
 
     embed = embed or OllamaEmbedder.from_config(c)
-    s = index.search(ws, q, embed)
+    instruction = c.get("embed", {}).get("query_instruction")
+    text = f"Instruct: {instruction}\nQuery: {q}" if instruction else q
+    s = index.search(ws, text, embed)
     if s.status == index.STALE:
         return _stale(ws, s.reason)
     if s.status == index.EMBEDDING_DOWN:
@@ -226,11 +241,16 @@ def query_main(argv=None, embed=None):
         e = items.get((kind, iid))
         if e:
             out.append(fmt(e, score))
+    age = _catalog_age(generated)
+    note = f"_catalog generated {generated}_"
+    if age is not None and age.days > STALE_AFTER_DAYS:
+        note += (f"  \n**Catalog is {age.days} days old:** run weekly.py (or regen_arsenal.py) "
+                 f"so new and removed tools show up.")
     if not out:
         best = ", ".join(f"{iid} ({score:.2f})" for score, _, iid in s.ranked[:3])
-        print(f"No match above {min_sim} for: '{q}'. Nearest (below threshold): {best}. "
-              f"The index covers skills only - for other kinds read arsenal.json.")
+        print(f"No match above {min_sim} for: '{q}'. Nearest (below threshold): {best}.")
+        print(note)
         return EXIT_OK
-    print(f"# Arsenal matches for: {q}\n")
+    print(f"# Arsenal matches for: {q}\n{note}\n")
     print("\n\n".join(out))
     return EXIT_OK

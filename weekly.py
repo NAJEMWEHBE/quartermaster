@@ -12,6 +12,9 @@ Zero-LLM-cost chain:
   4. regen_arsenal.py --prune --rebuild-index
   5. optional extra copy of arsenal.json (config "copy_to")
 
+Exit codes: 0 ok | 1 a step failed | 4 the catalog is fresh but the index build failed
+(logged as INDEX STALE).
+
 Deep study stays manual and human-approved: when the log says 'pending study: N',
 point your agent at the stub queue with prompts/study-agent.md. No tokens spent here.
 """
@@ -25,6 +28,7 @@ import sys
 from config import cfg, log, work_path
 from entry import Entry
 from matching import LiveSet, entry_keys, keys_of, nkey
+from regen_arsenal import EXIT_INDEX_FAILED
 
 PY = sys.executable
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -110,7 +114,11 @@ def main():
     for l in out.strip().splitlines():
         if any(k in l for k in ("LIVE inventory", "PRUNED", "PRUNE REFUSED", "build_index", "CATALOG FRESH")):
             log("regen: " + l.strip())
-    if rc != 0:
+    status = 0
+    if rc == EXIT_INDEX_FAILED:
+        log("INDEX STALE: build_index failed; queries keep the old index until a rebuild works")
+        status = rc
+    elif rc != 0:
         log(f"FATAL: prune/index failed: {out[-300:]}")
         return 1
 
@@ -121,7 +129,7 @@ def main():
 
     cat = json.load(open(work_path("arsenal.json"), encoding="utf-8"))
     log(f"=== done. catalog {cat['count']} | pending study {len(kept)} ===")
-    return 0
+    return status
 
 
 if __name__ == "__main__":

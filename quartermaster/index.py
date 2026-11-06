@@ -5,11 +5,13 @@
     search(ws, query, embed)        -> Search         (never raises for the cases below)
 
 A Search has one status: OK, EMBEDDING_DOWN (no embedder answered), or STALE (no usable
-index, or one built with another model or dimension). The embedder is injected (see
+index, one built with another model or dimension, or vectors and meta from two
+different builds). The embedder is injected (see
 embedder.py), and its `model` must match the one the index was built with.
 Needs numpy; imported lazily so catalog-only commands work without it.
 """
 import datetime
+import uuid
 from dataclasses import dataclass, field
 
 from . import workspace
@@ -55,8 +57,9 @@ class Search:
 
 def build(ws, entries, embed):
     """Embed `entries` (see indexed()) and write the index files atomically: vectors
-    first, then meta, so a query in between sees a count mismatch and reports STALE
-    instead of ranking against the wrong ids. Raises ValueError when there is nothing
+    first, then meta, both stamped with one build id, so a query in between (or after
+    a failed meta write) sees two ids that differ and reports STALE instead of ranking
+    against the wrong ids. Raises ValueError when there is nothing
     to index; embedder errors propagate."""
     import numpy as np
     items = indexed(entries)
@@ -67,9 +70,11 @@ def build(ws, entries, embed):
     for s in range(0, len(texts), BATCH):
         vecs.extend(embed(texts[s:s + BATCH]))
     arr = np.asarray(vecs, dtype=np.float32)
-    workspace.write_with(ws.path(workspace.INDEX_VECTORS), lambda f: np.savez(f, vecs=arr), mode="wb")
+    build_id = uuid.uuid4().hex
+    workspace.write_with(ws.path(workspace.INDEX_VECTORS),
+                         lambda f: np.savez(f, vecs=arr, build=np.array(build_id)), mode="wb")
     meta = {"generated": datetime.datetime.now().isoformat(timespec="seconds"),
-            "model": embed.model, "dim": int(arr.shape[1]),
+            "build": build_id, "model": embed.model, "dim": int(arr.shape[1]),
             "count": len(items), "source": workspace.CATALOG,
             "ids": [e.id for e in items], "kinds": [e.kind for e in items],
             "names": [invoke_name(e) for e in items],
@@ -83,10 +88,15 @@ def search(ws, query, embed):
     import numpy as np
     try:
         meta = ws.read_json(workspace.INDEX_META)
-        vecs = np.load(ws.path(workspace.INDEX_VECTORS), allow_pickle=False)["vecs"]
+        with np.load(ws.path(workspace.INDEX_VECTORS), allow_pickle=False) as z:
+            vecs = z["vecs"]
+            build = str(z["build"]) if "build" in z.files else None
+        # Indexes from before build ids carry none on either side and stay usable.
+        if build != meta.get("build"):
+            raise ValueError("vectors and meta come from different index builds")
         if vecs.ndim != 2 or vecs.shape[0] != len(meta["ids"]):
             raise ValueError(f"index holds {vecs.shape} vectors for {len(meta['ids'])} ids")
-    except (OSError, ValueError, KeyError) as e:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         return Search(STALE, reason=f"no usable index ({type(e).__name__}: {e})")
     if meta.get("model") != embed.model:
         # A model swap that keeps the dimension would rank silently wrong, so the

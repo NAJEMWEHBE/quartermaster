@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from . import matching
+from .workspace import term_safe
 
 # The 14-field entry contract, in the exact serialization order. Byte-identity of
 # arsenal.json depends on this order (dicts preserve insertion order).
@@ -66,6 +67,15 @@ def offline_label(v):
     return "offline" if v is True else ("partial" if v == "partial" else "online")
 
 
+def _text(v):
+    """One entry field as text: None, lists and objects become "", other scalars str();
+    characters UTF-8 can't hold (unpaired surrogates from a \\ud800 escape) become '?'."""
+    if v is None or isinstance(v, (list, dict)):
+        return ""
+    s = v if isinstance(v, str) else str(v)
+    return s.encode("utf-8", "replace").decode("utf-8")
+
+
 @dataclass
 class Entry:
     id: str = ""
@@ -87,16 +97,21 @@ class Entry:
     def from_raw(cls, d):
         """Normalize a raw study-fleet dict into an Entry (was assemble_catalog.normalize).
 
-        List fields become a list-or-[]-or-[value]; scalars default to ""; a missing id
-        falls back to slug(name) or 'unknown'; tier is coerced to the Tier vocabulary.
+        List fields become a list-or-[]-or-[value] of strings; other fields become
+        strings, defaulting to ""; offline keeps True / False / "partial"; a missing id falls
+        back to slug(name) or 'unknown'; tier is coerced to the Tier vocabulary.
+        Entry files come from study agents, so any JSON type can arrive here.
         """
         out = {}
         for k in FIELDS:
             v = d.get(k)
             if k in LIST_FIELDS:
-                out[k] = v if isinstance(v, list) else ([] if v in (None, "") else [v])
+                seq = v if isinstance(v, list) else ([] if v in (None, "") else [v])
+                out[k] = [_text(x) for x in seq if x is not None and not isinstance(x, (list, dict))]
+            elif k == "offline":
+                out[k] = v if (v is True or v is False or v == "partial") else ""
             else:
-                out[k] = v if v is not None else ""
+                out[k] = _text(v)
         if not out["id"]:
             out["id"] = matching.slug(out["name"]) or "unknown"
         out["tier"] = Tier.coerce(out["tier"])
@@ -151,7 +166,7 @@ def md_block(entry):
     if entry.example:
         lines.append(f"- **Example:** {entry.example}")
     lines.append("")
-    return "\n".join(lines)
+    return term_safe("\n".join(lines))
 
 
 def render_md(entries, generated):

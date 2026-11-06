@@ -24,6 +24,7 @@ import urllib.error
 import urllib.request
 
 from .frontmatter import frontmatter
+from .workspace import term_safe
 
 
 class InventoryError(Exception):
@@ -199,19 +200,47 @@ def _declared_skills(root, plugin):
     return [d for d in declared if isinstance(d, str)] if isinstance(declared, list) else None
 
 
+def _declared_dir(root, d):
+    """A declared skills path resolved inside the plugin root, or None if it leaves it
+    (absolute, drive or UNC paths, `..` past the root) or can't name a file (NUL)."""
+    if "\x00" in d or os.path.isabs(d) or os.path.splitdrive(d)[0] or d.startswith(("/", "\\")):
+        return None
+    base = os.path.abspath(root)
+    full = os.path.normpath(os.path.join(base, d))
+    return full if _under(os.path.normcase(full), os.path.normcase(base)) else None
+
+
 def plugin_skill_files(root, plugin):
     """The SKILL.md files Claude Code loads for one plugin: each declared path (a skill
     folder, or a folder of skill folders), or by default skills/<name>/SKILL.md. Drafts
-    deeper in the tree and SKILL.md files elsewhere in the repo are not loaded."""
+    deeper in the tree and SKILL.md files elsewhere in the repo are not loaded, and
+    neither are paths or files that leave the plugin's install dir (with a warning)."""
     declared = _declared_skills(root, plugin)
     if declared is None:
-        return sorted(glob.glob(os.path.join(root, "skills", "*", "SKILL.md")))
-    files = []
-    for d in declared:
-        d = os.path.normpath(os.path.join(root, d))
-        own = os.path.join(d, "SKILL.md")
-        files += [own] if os.path.isfile(own) else sorted(glob.glob(os.path.join(d, "*", "SKILL.md")))
-    return files
+        found = sorted(glob.glob(os.path.join(glob.escape(root), "skills", "*", "SKILL.md")))
+    else:
+        found = []
+        for d in declared:
+            full = _declared_dir(root, d)
+            if full is None:
+                print(f"WARNING: {plugin}: ignoring skills path {d!r} (must stay inside the plugin)",
+                      file=sys.stderr)
+                continue
+            own = os.path.join(full, "SKILL.md")
+            try:
+                found += [own] if os.path.isfile(own) else sorted(
+                    glob.glob(os.path.join(glob.escape(full), "*", "SKILL.md")))
+            except (OSError, ValueError) as e:
+                print(f"WARNING: {plugin}: cannot list skills path {d!r} ({type(e).__name__})",
+                      file=sys.stderr)
+    real_root = _norm(root)
+    kept = []
+    for p in found:
+        if _under(_norm(p), real_root):
+            kept.append(p)
+        else:  # a link inside the plugin that points outside it
+            print(f"WARNING: {plugin}: ignoring {p!r} (resolves outside the plugin)", file=sys.stderr)
+    return kept
 
 
 def plugin_skills(installs, enabled=None):
@@ -282,7 +311,7 @@ def ollama_models(url="http://127.0.0.1:11434", timeout=2):
         return [{"kind": "model", "name": m["name"], "engine": "ollama-local"}
                 for m in models if isinstance(m, dict) and isinstance(m.get("name"), str)]
     except (OSError, ValueError) as e:
-        print(f"WARNING: no Ollama server answered at {url} ({e}); skipping model enumeration",
+        print(f"WARNING: no Ollama server answered at {url} ({term_safe(e)}); skipping model enumeration",
               file=sys.stderr)
         return []
 
@@ -341,4 +370,23 @@ def scan(scan_cfg, ollama_url="http://127.0.0.1:11434"):
         items += local_mcp(scan_cfg["mcp_dir"])
     if scan_cfg.get("ollama_models"):
         items += ollama_models(ollama_url)
-    return items
+    kept = []
+    for it in items:
+        if _encodable(it):
+            kept.append(it)
+        else:
+            print(f"WARNING: skipping a {it.get('kind', 'tool')} whose name or path is not valid "
+                  f"Unicode: {it.get('path') or it.get('name')!a}", file=sys.stderr)
+    return kept
+
+
+def _encodable(item):
+    """False when a string in a scan item can't be written as UTF-8: a file name the OS
+    could not decode (surrogateescape on POSIX, an unpaired UTF-16 surrogate on NTFS) or
+    a \\ud800-style escape in a JSON reply. Such an item is skipped, not fatal: one odd
+    name must not stop the whole refresh."""
+    try:
+        json.dumps(item, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True

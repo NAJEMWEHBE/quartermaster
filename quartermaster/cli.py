@@ -14,7 +14,7 @@ import sys
 from . import catalog_file, config, index, inventory, pipeline, workspace
 from .embedder import OllamaEmbedder
 from .entry import Entry, offline_label
-from .workspace import Workspace
+from .workspace import Workspace, term_safe
 
 # query exit codes, one meaning each (SKILL.md maps each to one action)
 EXIT_OK = 0
@@ -46,8 +46,10 @@ def enumerate_main(argv=None):
     c, ws = _setup()
     try:
         r = pipeline.enumerate_live(c, ws)
-    except inventory.InventoryError as e:
-        print(f"ERROR: {e}", file=sys.stderr)
+    except (inventory.InventoryError, OSError, ValueError) as e:
+        # ValueError includes UnicodeError, whose text may hold what UTF-8 can't write
+        why = str(e).encode("utf-8", "backslashreplace").decode("utf-8")
+        print(f"ERROR: {term_safe(why)}", file=sys.stderr)
         return 1
     print(f"WROTE {r.path}")
     print("counts:", r.counts, "total:", len(r.items))
@@ -86,7 +88,7 @@ def build_index_main(argv=None, embed=None):
         print("numpy is missing: pip install -r requirements.txt", file=sys.stderr)
         return 1
     except (OSError, ValueError, RuntimeError) as e:
-        print(f"build_index FAILED: {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"build_index FAILED: {type(e).__name__}: {term_safe(e)}", file=sys.stderr)
         return 1
     print(f"wrote {workspace.INDEX_VECTORS} ({info.count}x{info.dim}) + meta")
     return 0
@@ -108,7 +110,7 @@ def regen_main(argv=None, embed=None):
     c, ws = _setup()
     r = pipeline.regen(c, ws, prune=a.prune, force_prune=a.force_prune,
                        rebuild_index=a.rebuild_index, embed=embed)
-    print("\n".join(r.lines()))
+    print(term_safe("\n".join(r.lines())))
     return r.status
 
 
@@ -146,7 +148,7 @@ def fmt(entry, sim=None):
     for k, label in (("pairs_with", "Pairs with"), ("triggers", "Triggers")):
         if entry.get(k):
             lines.append(f"- **{label}:** {', '.join(map(str, entry[k]))}")
-    return "\n".join(lines)
+    return term_safe("\n".join(lines))
 
 
 def _no_catalog(ws, err):
@@ -184,25 +186,43 @@ def query_main(argv=None, embed=None):
 
     try:
         cat = ws.read_json(workspace.CATALOG)
-        items = {(i.get("kind", ""), i["id"]): i for i in cat["items"]}
-    except (OSError, ValueError, KeyError, TypeError) as e:
+        items = {(i.get("kind", ""), i["id"]): i for i in cat["items"] if isinstance(i, dict)}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError) as e:
         return _no_catalog(ws, e)
     generated = cat.get("generated")
 
-    if a.explain:
-        hits = [v for (_, i), v in items.items() if i == a.explain]
+    if a.explain is not None:
+        ref = a.explain.strip().lstrip("/").lower()  # Invoke lines print `/plugin:skill`
+        if not ref:
+            ap.print_usage()
+            return EXIT_USAGE
+
+        def labels(iid, v):
+            # Every handle query output gives a tool: its id and its name (the name is
+            # also a plugin skill's Invoke label, see index.invoke_name).
+            return {str(iid).strip().lower(), str(v.get("name", "")).strip().lower()}
+
+        hits, near = [], []
+        for (_, i), v in items.items():
+            if ref in labels(i, v):
+                hits.append(v)
+            elif ref in str(i).lower() or ref in str(v.get("name", "")).lower():
+                near.append(v)
+        listed = ", ".join(f"{h['id']} ({h.get('kind', '?')}, name {str(h.get('name', ''))!r})"
+                           for h in near[:10])
+        if len(near) > 10:
+            listed += f" and {len(near) - 10} more"
         if not hits:
-            probe = a.explain.lower()
-            hits = [v for (_, i), v in items.items()
-                    if probe in i.lower() or probe in str(v.get("name", "")).lower()]
-            if len(hits) > 1:
-                print(f"ambiguous '{a.explain}' - candidates: "
-                      + ", ".join(f"{h['id']} ({h.get('kind', '?')})" for h in hits[:10]))
-                return EXIT_OK
-        if not hits:
-            print(f"no tool with id like '{a.explain}' in the catalog ({len(items)} items)")
+            if near:
+                print(term_safe(f"NO EXACT MATCH for {a.explain!r}: no tool has this id or name. "
+                                f"{len(near)} tool(s) contain it: {listed}. Ask the owner which "
+                                f"one they mean before explaining any of them."))
+            else:
+                print(f"no tool with id like {a.explain!r} in the catalog ({len(items)} items)")
             return EXIT_OK
-        print("\n\n".join(fmt(e) for e in hits))  # one id can name a plugin and its skill
+        print("\n\n".join(fmt(e) for e in hits))  # one label can name a plugin and its skill
+        if near:
+            print(term_safe(f"\n_Other tools containing {a.explain!r} (not this one): {listed}_"))
         return EXIT_OK
 
     q = " ".join(a.query).strip()
@@ -223,14 +243,14 @@ def query_main(argv=None, embed=None):
     if s.status == index.STALE:
         return _stale(ws, s.reason)
     if s.status == index.EMBEDDING_DOWN:
-        print(f"EMBEDDING-UNAVAILABLE: {s.reason}", file=sys.stderr)
+        print(f"EMBEDDING-UNAVAILABLE: {term_safe(s.reason)}", file=sys.stderr)
         print(f"Semantic search is down ({s.hint}). Degrade: read "
               f"arsenal.json in the work dir directly: {ws.path(workspace.CATALOG)}")
         return EXIT_EMBEDDING_DOWN
 
     if a.sims:
         for score, kind, iid in s.ranked[: max(a.k, 15)]:
-            print(f"{score:.4f}  {kind}/{iid}")
+            print(term_safe(f"{score:.4f}  {kind}/{iid}"))
         return EXIT_OK
 
     min_sim = c.get("query", {}).get("min_sim", 0.60)
@@ -248,7 +268,7 @@ def query_main(argv=None, embed=None):
                  f"so new and removed tools show up.")
     if not out:
         best = ", ".join(f"{iid} ({score:.2f})" for score, _, iid in s.ranked[:3])
-        print(f"No match above {min_sim} for: '{q}'. Nearest (below threshold): {best}.")
+        print(term_safe(f"No match above {min_sim} for: '{q}'. Nearest (below threshold): {best}."))
         print(note)
         return EXIT_OK
     print(f"# Arsenal matches for: {q}\n{note}\n")

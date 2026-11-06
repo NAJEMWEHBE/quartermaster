@@ -29,6 +29,10 @@ from .matching import LiveSet, dedup_key, entry_keys, keys_of, nkey
 # the old index (the query side calls that INDEX-STALE).
 EXIT_OK, EXIT_FAILED, EXIT_INDEX_FAILED = 0, 1, 4
 
+# What reading one work-dir JSON file can raise: a missing or locked file, bad JSON or
+# encoding (ValueError), or nesting deeper than the parser's recursion limit.
+PARSE_ERRORS = (OSError, ValueError, RecursionError)
+
 # Mass-prune circuit breaker: both must hold for a refusal, so small catalogs (and the
 # test fixtures) always prune freely while a collapse-shaped prune needs force_prune
 # (2026-07-19: a harness cache sweep read as 129 uninstalls and gutted the catalog).
@@ -84,8 +88,8 @@ def load_batches(ws):
     for fp in files:
         try:
             data = workspace.read_json(fp)
-        except (OSError, ValueError) as e:
-            warns.append(f"UNPARSEABLE {os.path.basename(fp)}: {e}")
+        except PARSE_ERRORS as e:
+            warns.append(f"UNPARSEABLE {os.path.basename(fp)}: {type(e).__name__}: {e}")
             continue
         if isinstance(data, dict) and "items" in data:
             data = data["items"]
@@ -225,12 +229,17 @@ def regen(c, ws, prune=False, force_prune=False, rebuild_index=False, embed=None
     entries back every week, and one accepted force_prune must not be refused again."""
     try:
         live = enumerate_live(c, ws).items
-    except (inventory.InventoryError, OSError) as e:
-        return RegenResult(status=EXIT_FAILED, error=f"enumerate failed: {e}")
+    except (inventory.InventoryError, OSError, ValueError) as e:
+        # ValueError includes UnicodeError: a name UTF-8 can't hold, so the message is
+        # escaped where it can't be written as is
+        why = str(e).encode("utf-8", "backslashreplace").decode("utf-8")
+        return RegenResult(status=EXIT_FAILED, error=f"enumerate failed: {why}")
     try:
-        studied = ws.read_json(workspace.CATALOG).get("items", [])
-    except (OSError, ValueError):
-        studied = []
+        cat = ws.read_json(workspace.CATALOG)
+    except PARSE_ERRORS:
+        cat = {}
+    studied = cat.get("items") if isinstance(cat, dict) else None
+    studied = [e for e in studied if isinstance(e, dict)] if isinstance(studied, list) else []
 
     added, removed, unchanged = diff(live, studied)
     now = LiveSet(live)
@@ -315,17 +324,18 @@ def _deep_entries(ws):
             continue
         try:
             data = workspace.read_json(fp)
-        except (OSError, ValueError):
+        except PARSE_ERRORS:
             continue
         items = data.get("items", data) if isinstance(data, dict) else data
-        deep += [e for e in (items if isinstance(items, list) else []) if isinstance(e, dict)]
+        deep += [Entry.from_raw(e) for e in (items if isinstance(items, list) else [])
+                 if isinstance(e, dict)]
     return deep
 
 
 def _old_stubs(ws):
     try:
         old = ws.read_json(workspace.STUBS)
-    except (OSError, ValueError):
+    except PARSE_ERRORS:
         return []
     rows = old.get("items", old) if isinstance(old, dict) else old
     return [Entry.from_dict(e) for e in rows if isinstance(e, dict)] if isinstance(rows, list) else []
@@ -361,8 +371,8 @@ def weekly(c, ws, embed=None):
 
     try:
         a = assemble(ws)
-    except OSError as e:
-        ws.log(f"FATAL: assemble failed: {e}")
+    except Exception as e:  # the scheduled run logs why it stopped instead of a bare traceback
+        ws.log(f"FATAL: assemble failed: {type(e).__name__}: {e}")
         return WeeklyResult(EXIT_FAILED)
     ws.log("assemble: " + a.summary())
 
@@ -374,8 +384,8 @@ def weekly(c, ws, embed=None):
         if any(k in line for k in WEEKLY_LOGGED):
             ws.log("regen: " + line.strip())
     if r.status == EXIT_INDEX_FAILED:
-        ws.log(f"INDEX STALE: build_index failed ({r.index_error}); queries keep the old "
-               f"index until a rebuild works")
+        ws.log(f"INDEX STALE: build_index failed ({r.index_error}); queries use the last complete "
+               f"index, or report INDEX-STALE, until a rebuild works")
 
     dest = c.get("copy_to")
     if dest:

@@ -52,7 +52,7 @@ def test_a_write_that_fails_midway_leaves_the_old_catalog_intact(tmp_path):
     catalog_file.write(str(path), _sample_entries(), generated="old")
     before = path.read_text(encoding="utf-8")
 
-    broken = _sample_entries() + [Entry.from_raw({"id": "zz", "kind": "skill", "example": object()})]
+    broken = _sample_entries() + [Entry(id="zz", kind="skill", example=object())]
     with pytest.raises(TypeError):
         catalog_file.write(str(path), broken, generated="new")
     assert path.read_text(encoding="utf-8") == before

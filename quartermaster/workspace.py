@@ -9,6 +9,7 @@ the data is fsynced before the move, so a power cut can't leave an empty file ei
 import datetime
 import json
 import os
+import re
 import tempfile
 import time
 
@@ -24,6 +25,18 @@ INDEX_VECTORS = "arsenal_index.npz"
 INDEX_META = "arsenal_index.meta.json"
 ENTRIES = "entries"
 STUBS = os.path.join(ENTRIES, "batch-zz-stubs.json")  # 'zz' sorts last: deep entries win
+
+# C0 controls except tab and newline, DEL, and the C1 controls. Text from installed tools,
+# study agents and the embedding server reaches the console and the log; a terminal acts
+# on these characters, so they are shown as visible \xNN escapes instead.
+_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def term_safe(text):
+    """`text` with every terminal control character except tab and newline made visible.
+
+    Windows line endings (CRLF) become plain newlines first, so they don't show as escapes."""
+    return _CONTROLS.sub(lambda m: "\\x%02x" % ord(m.group()), str(text).replace("\r\n", "\n"))
 
 
 def _replace(src, dst, tries=10):
@@ -117,7 +130,9 @@ class Workspace:
         return os.path.exists(self.path(name))
 
     def log(self, line):
-        """Print a line and, when the config names a log file, append it with a timestamp."""
+        """Print a line and, when the config names a log file, append it with a timestamp.
+        Control characters are made visible and newlines escaped: one call, one log line."""
+        line = term_safe(line).replace("\n", "\\n")
         print(line)
         if self.log_file:
             os.makedirs(self.dir, exist_ok=True)

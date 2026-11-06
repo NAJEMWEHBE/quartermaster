@@ -26,8 +26,11 @@ have named your pick.
 python "${CLAUDE_PLUGIN_ROOT}/query_arsenal.py" --explain <tool-id>
 ```
 
-An inexact id prints the candidates as `id (kind)`; rerun with the exact id. Explain in
-plain words first, then the avoid_when, so the owner knows the boundaries.
+Pass the tool's id, or its Invoke or heading name exactly as a query printed it.
+`NO EXACT MATCH` means no tool in the catalog has that id or name: say so, show the
+owner the listed candidates with their names, ask which one they mean, and never
+explain a candidate as the tool asked for. Explain in plain words first, then the
+avoid_when, so the owner knows the boundaries.
 
 ## Exit codes
 

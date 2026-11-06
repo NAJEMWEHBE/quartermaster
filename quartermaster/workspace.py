@@ -33,8 +33,10 @@ _CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
 def term_safe(text):
-    """`text` with every terminal control character except tab and newline made visible."""
-    return _CONTROLS.sub(lambda m: "\\x%02x" % ord(m.group()), str(text))
+    """`text` with every terminal control character except tab and newline made visible.
+
+    Windows line endings (CRLF) become plain newlines first, so they don't show as escapes."""
+    return _CONTROLS.sub(lambda m: "\\x%02x" % ord(m.group()), str(text).replace("\r\n", "\n"))
 
 
 def _replace(src, dst, tries=10):

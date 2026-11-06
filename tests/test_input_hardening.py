@@ -268,3 +268,9 @@ def test_an_undecodable_skill_folder_name_is_skipped(qm_env, tmp_path):
     assert cli.enumerate_main([]) == 0
     data = json.loads((qm_env / "arsenal_items.json").read_text(encoding="utf-8"))
     assert [i for i in data["items"] if i["kind"] == "skill"] == []
+
+
+def test_term_safe_keeps_windows_line_endings_readable():
+    from quartermaster.workspace import term_safe
+    assert term_safe("a\r\nb") == "a\nb"
+    assert term_safe("a\rb") == "a\\x0db"

@@ -13,10 +13,34 @@ def slug(s):
     return re.sub(r"[^a-z0-9]+", "-", str(s or "").lower()).strip("-")
 
 
+def _drop_parentheticals(s):
+    """re.sub(r"\\(.*?\\)", "", s) in linear time. The regex rescans to the end of the
+    line for every '(' with no ')' after it, which is quadratic on long names."""
+    out, i, n = [], 0, len(s)
+    close = eol = -1  # next ')' and next newline at or after the current '('
+    while True:
+        j = s.find("(", i)
+        if j < 0:
+            out.append(s[i:])
+            return "".join(out)
+        out.append(s[i:j])
+        if close <= j:
+            close = s.find(")", j + 1)
+            close = n if close < 0 else close
+        if eol <= j:
+            eol = s.find("\n", j + 1)
+            eol = n if eol < 0 else eol
+        if close < eol:      # '(...)' on one line: drop it
+            i = close + 1
+        else:                # no ')' before the line ends: keep up to the newline
+            out.append(s[j:eol])
+            i = eol
+
+
 def nkey(s):
     """Match key: strip parenthetical suffixes so studied names and enumerated
     names collapse to the same key ('foo (plugin)' == 'foo')."""
-    return slug(re.sub(r"\(.*?\)", "", str(s or "")))
+    return slug(_drop_parentheticals(str(s or "")))
 
 
 def contains(k, keys):

@@ -106,7 +106,7 @@ queries, marked as stubs), uninstalled tools are pruned, and the log ends with
 | | 1 | usage error, or numpy missing |
 | | 2 | EMBEDDING-UNAVAILABLE: no embedding server answered, or the model isn't pulled; `arsenal.json` is fine |
 | | 3 | CATALOG-UNAVAILABLE: no readable `arsenal.json` in the work dir |
-| | 4 | INDEX-STALE: index missing, or built with another model; run `regen_arsenal.py --rebuild-index` |
+| | 4 | INDEX-STALE: index missing, built with another model, or left half-written by a failed build; run `regen_arsenal.py --rebuild-index` |
 | `regen_arsenal.py`, `weekly.py` | 0 | ok |
 | | 1 | a step failed (the scan, or assemble); nothing half-written |
 | | 4 | the catalog is up to date but the index build failed (weekly logs `INDEX STALE`) |

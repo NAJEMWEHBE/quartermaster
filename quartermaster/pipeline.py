@@ -80,11 +80,17 @@ class AssembleResult:
                 f"unique: {self.unique} | dups: {self.dups}")
 
 
+def _batch_files(ws):
+    """entries/batch-*.json paths; the work dir is escaped so a folder name with
+    [ ] * or ? is matched literally."""
+    return glob.glob(os.path.join(glob.escape(ws.path(workspace.ENTRIES)), "batch-*.json"))
+
+
 def load_batches(ws):
     """[(file name, raw entry dict)] from entries/batch-*.json in name order (so deep
     batches load before the zz stub file), plus warnings and the file count."""
     entries, warns = [], []
-    files = sorted(glob.glob(ws.path(workspace.ENTRIES, "batch-*.json")))
+    files = sorted(_batch_files(ws))
     for fp in files:
         try:
             data = workspace.read_json(fp)
@@ -319,7 +325,7 @@ def stub_queue(added, old_stubs, deep_keys, live):
 def _deep_entries(ws):
     stubs = os.path.abspath(ws.path(workspace.STUBS))
     deep = []
-    for fp in glob.glob(ws.path(workspace.ENTRIES, "batch-*.json")):
+    for fp in _batch_files(ws):
         if os.path.abspath(fp) == stubs:
             continue
         try:

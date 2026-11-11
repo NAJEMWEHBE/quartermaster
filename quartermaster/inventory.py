@@ -96,7 +96,7 @@ def registry_gate(registry_path):
 
 
 def _skill_files(root):
-    return sorted(glob.glob(os.path.join(root, "**", "SKILL.md"), recursive=True))
+    return sorted(glob.glob(os.path.join(glob.escape(root), "**", "SKILL.md"), recursive=True))
 
 
 def _skill_item(path, plugin=None, marketplace=None):
